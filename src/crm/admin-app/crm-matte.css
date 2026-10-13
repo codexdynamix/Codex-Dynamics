@@ -1,0 +1,188 @@
+/* CRM-only matte refinement. Layout, placement, and behavior stay as they are.
+   No glow, glass, gloss, or neon. The public site is not targeted. */
+@layer crm-theme {
+  .crm-admin-app,
+  .crm-admin-app[data-crm-glass="true"] {
+    --crm-ios-backdrop: none;
+    --crm-ios-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.18);
+    --crm-ios-shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.16);
+    --crm-ios-shadow-modal: 0 16px 40px rgba(0, 0, 0, 0.28);
+    --crm-ios-focus: transparent;
+  }
+
+  .crm-admin-app *,
+  .crm-admin-app *::before,
+  .crm-admin-app *::after {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .crm-admin-app .crm-inline-df5423c714,
+  .crm-admin-app .crm-inline-125812edbc,
+  .crm-admin-app .crm-profile-ambient-glow {
+    display: none;
+  }
+
+  .crm-admin-app .crm-inline-86deeb14b8,
+  .crm-admin-app .crm-inline-cf0ee39fa6 {
+    background: #1c1c1e;
+  }
+
+  .crm-admin-app .crm-inline-b1d484ca6f {
+    background: #3a3a3c;
+    box-shadow: none;
+  }
+
+  .crm-admin-app :is(
+    .crm-inline-776b91ae58,
+    .crm-inline-a18d7c18f1,
+    .crm-inline-9ded8c5375,
+    .crm-inline-4a3a5353f3,
+    .crm-profile-modal,
+    .crm-modal-content,
+    .crm-super-admin-modal-card
+  ) {
+    background: #2c2c2e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  }
+
+  .crm-admin-app .crm-inline-a7f179cb84,
+  .crm-admin-app .crm-inline-ffab205caa,
+  .crm-admin-app .crm-profile-avatar-box {
+    box-shadow: none;
+  }
+
+  .crm-admin-app .crm-inline-16f7250a81,
+  .crm-admin-app .crm-super-admin-btn,
+  .crm-admin-app .crm-tab-btn,
+  .crm-admin-app .crm-logout-btn {
+    box-shadow: none;
+  }
+
+  .crm-admin-app .crm-ios-icon-badge {
+    box-shadow: none;
+    background: #3a3a3c;
+  }
+
+  .crm-admin-app .crm-ios-icon-badge.blue { background: #0071e3; }
+  .crm-admin-app .crm-ios-icon-badge.purple { background: #5e5ce6; }
+  .crm-admin-app .crm-ios-icon-badge.amber { background: #d97706; }
+  .crm-admin-app .crm-ios-icon-badge.teal { background: #0284c7; }
+  .crm-admin-app .crm-ios-icon-badge.orange { background: #ea580c; }
+  .crm-admin-app .crm-ios-icon-badge.green { background: #15803d; }
+
+  .crm-admin-app .crm-inline-0aa5121659,
+  .crm-admin-app .crm-inline-fe771601b6 {
+    color: #b0b0b5;
+  }
+
+  .crm-admin-app .crm-role-portal-card:hover,
+  .crm-admin-app .crm-client-portal-link:hover {
+    transform: none;
+    background: #343436;
+    border-color: rgba(255, 255, 255, 0.18);
+    box-shadow: none;
+  }
+
+  .crm-admin-app .crm-modal-overlay,
+  .crm-admin-app .crm-profile-overlay {
+    background: rgba(0, 0, 0, 0.56);
+  }
+
+  .crm-admin-app :is(
+    .crm-inline-64d7ced97c,
+    .crm-inline-356e628bfe,
+    .crm-inline-fb118bf1e8,
+    .sess-online-dot,
+    .sess-online-dot.online,
+    .crm-profile-online-pulse
+  ) {
+    box-shadow: none;
+  }
+
+  .crm-admin-app :focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.28);
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+}
+
+/* Keep modal surfaces in the same cascade as the legacy, unlayered CRM styles. */
+.crm-admin-app.crm-admin-app .crm-modal-overlay,
+.crm-modal-overlay {
+  background: rgba(0, 0, 0, 0.56);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.crm-admin-app.crm-admin-app .crm-modal-content,
+.crm-admin-app.crm-admin-app .crm-super-admin-modal-card,
+.crm-profile-overlay .crm-profile-modal {
+  background: var(--crm-card-surface, var(--crm-card-hover, var(--crm-card, #2c2c2e)));
+  border: 1px solid var(--crm-border, rgba(255, 255, 255, 0.14));
+  border-radius: var(--crm-radius, 14px);
+  box-shadow: var(--crm-ios-shadow-modal, 0 16px 40px rgba(0, 0, 0, 0.28));
+  color: var(--crm-text-primary, #f5f5f7);
+}
+
+.crm-profile-overlay {
+  background: rgba(0, 0, 0, 0.56);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.crm-profile-overlay .crm-profile-modal {
+  max-width: 530px;
+}
+
+.crm-profile-overlay .crm-profile-ambient-glow {
+  display: none;
+}
+
+.crm-profile-overlay .crm-profile-header-wrap,
+.crm-profile-overlay .crm-profile-modal-footer {
+  border-color: var(--crm-border, rgba(255, 255, 255, 0.14));
+}
+
+.crm-profile-overlay .crm-profile-tabs-bar {
+  background: var(--crm-bg, #1c1c1e);
+  border-color: var(--crm-border, rgba(255, 255, 255, 0.14));
+}
+
+.crm-profile-overlay .crm-profile-tab-button.is-active {
+  background: var(--crm-card-hover, #3a3a3c);
+  border-color: var(--crm-border, rgba(255, 255, 255, 0.14));
+  box-shadow: none;
+}
+
+.crm-profile-overlay .crm-profile-modal-footer {
+  background: var(--crm-card-surface, var(--crm-card-hover, var(--crm-card, #2c2c2e)));
+}
+
+.crm-admin-app :is(.crm-super-admin-tabs, .crm-react-capability-tabs) {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--crm-text-muted, #929298) 42%, transparent) transparent;
+}
+
+.crm-admin-app :is(.crm-super-admin-tabs, .crm-react-capability-tabs)::-webkit-scrollbar {
+  display: block;
+  width: 4px;
+  height: 4px;
+}
+
+.crm-admin-app :is(.crm-super-admin-tabs, .crm-react-capability-tabs)::-webkit-scrollbar-track,
+.crm-admin-app :is(.crm-super-admin-tabs, .crm-react-capability-tabs)::-webkit-scrollbar-corner,
+.crm-admin-app :is(.crm-super-admin-tabs, .crm-react-capability-tabs)::-webkit-scrollbar-button {
+  background: transparent;
+  display: none;
+}
+
+.crm-admin-app :is(.crm-super-admin-tabs, .crm-react-capability-tabs)::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--crm-text-muted, #929298) 42%, transparent);
+  border-radius: 999px;
+}
+
+.crm-admin-app :is(.crm-super-admin-tabs, .crm-react-capability-tabs)::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--crm-accent, #0071e3) 58%, var(--crm-text-muted, #929298));
+}

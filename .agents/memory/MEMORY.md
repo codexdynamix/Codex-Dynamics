@@ -1,0 +1,1 @@
+- [GitHub workspace authentication](github-workspace-auth.md) — a linked account may still leave Replit Git/CLI without usable credentials; verify authentication before retrying pushes.

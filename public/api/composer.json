@@ -1,0 +1,9 @@
+{
+    "scripts": {
+        "migrate:mongodb": "php bin/migrate-sqlite-to-mongodb.php",
+        "test:mongodb": "@php tests/mongodb-foundation.php"
+    },
+    "require": {
+        "mongodb/mongodb": "^2.5"
+    }
+}

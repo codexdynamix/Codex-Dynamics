@@ -1,0 +1,204 @@
+@layer crm-theme {
+  .crm-admin-app #analytics-section .crm-dashboard-kpi {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-kpi-accent {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--kpi-accent);
+    opacity: 0.85;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-kpi-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-kpi-label {
+    color: var(--crm-text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-kpi-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--kpi-accent) 12%, transparent);
+    color: var(--kpi-accent);
+    font-size: 13px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-kpi-value {
+    color: var(--crm-text-primary);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-kpi-sub {
+    margin-top: 4px;
+    color: #7B8392;
+    font-size: 11.5px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-status-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-status-list {
+    flex: 1;
+    min-width: 140px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    color: #C8CDD6;
+    font-size: 12px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-status-swatch {
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+    border-radius: 3px;
+    background: var(--status-color);
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-status-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-status-value,
+  .crm-admin-app #analytics-section .crm-dashboard-hbar-value {
+    color: var(--crm-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-office-list {
+    margin-top: 8px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-hbar {
+    margin-bottom: 10px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-hbar-labels {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    color: #C8CDD6;
+    font-size: 12px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-hbar-name {
+    font-weight: 500;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-hbar-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--crm-card-hover);
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-hbar-fill {
+    width: var(--bar-width);
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--bar-color) 67%, transparent), var(--bar-color));
+    transition: width 0.3s ease;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-table-scroll {
+    overflow-x: auto;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table th,
+  .crm-admin-app #analytics-section .crm-dashboard-team-table td {
+    padding: 8px 6px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table th {
+    border-bottom: 1px solid var(--crm-border);
+    color: var(--crm-text-secondary);
+    font-weight: 500;
+    text-align: left;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table td {
+    border-bottom: 1px solid #1E2026;
+    color: var(--crm-text-primary);
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table td.is-office {
+    color: #C8CDD6;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table :is(th, td).is-numeric {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table td.is-converted {
+    color: #30D158;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table td.is-rate {
+    color: var(--crm-accent);
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-team-table .crm-dashboard-table-empty {
+    padding: 14px 6px;
+    color: var(--crm-text-secondary);
+    text-align: center;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-empty {
+    padding: 8px 0;
+    color: var(--crm-text-secondary);
+    font-size: 12px;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-online-icon {
+    position: relative;
+  }
+
+  .crm-admin-app #analytics-section .crm-dashboard-online-indicator {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #1E2026;
+    border-radius: 50%;
+    background: #30D158;
+  }
+}
