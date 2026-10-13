@@ -2,8 +2,8 @@ import React from 'react';
 import { ClientLoginSplitView } from '@/components/ClientLoginSplitView';
 import { smoothNavigate } from '@/lib/nav';
 
-interface PortalLoginProps {
-  onLoginSuccess: () => void;
+export interface PortalLoginProps {
+  onLoginSuccess?: () => void;
 }
 
 export function PortalLogin({ onLoginSuccess }: PortalLoginProps) {
@@ -16,3 +16,5 @@ export function PortalLogin({ onLoginSuccess }: PortalLoginProps) {
     />
   );
 }
+
+export default PortalLogin;

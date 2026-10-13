@@ -54,10 +54,37 @@ import { fetchAdminSettings } from '../../platformDefaults';
 import { getClientProfilePath } from '../clientProfileRouting';
 import { matchesClientOwnershipFilter, matchesStaffStructureFilter } from '../clientOwnership';
 import { normalizeCsvHeader, parseCsvRows } from '../csvUtils';
-import {
-  createLogAdminAction,
-  createLogActivity,
-} from '../data/data';
+const createLogAdminAction = (setAuditLog) => (admin, action, details, clientName = '') => {
+  if (typeof setAuditLog === 'function') {
+    setAuditLog((prev) => [
+      {
+        id: 'audit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        admin: typeof admin === 'string' ? admin : (admin?.name || admin?.username || 'Admin'),
+        action: typeof action === 'string' ? action : 'action',
+        details: typeof details === 'string' ? details : JSON.stringify(details || ''),
+        clientName: clientName || '',
+        timestamp: new Date(),
+      },
+      ...(Array.isArray(prev) ? prev : []),
+    ]);
+  }
+};
+
+const createLogActivity = (setActivityLog) => (userId, type, details) => {
+  if (typeof setActivityLog === 'function') {
+    setActivityLog((prev) => [
+      {
+        id: 'act_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        userId: userId || '',
+        type: type || 'activity',
+        details: typeof details === 'string' ? details : JSON.stringify(details || ''),
+        timestamp: new Date(),
+      },
+      ...(Array.isArray(prev) ? prev : []),
+    ]);
+  }
+};
+
 
 function AllClientsTable({ data, currentUser, setData, setClientAssignment, showNotification, onOpenProfile }) {
   const navigate = useNavigate();

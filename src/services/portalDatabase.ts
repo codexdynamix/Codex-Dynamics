@@ -480,7 +480,7 @@ export const portalDb = {
     replaceClientRows('domains', 'domains');
     replaceClientRows('supportTickets', 'tickets');
     replaceClientRows('files', 'files');
-    db.notifications = (Array.isArray(data.notifications) ? data.notifications : []).map((row) => ({
+    db.notifications = (Array.isArray(data.notifications) ? data.notifications : []).map((row: any) => ({
       ...fromApiRow(row),
       clientId,
     }));

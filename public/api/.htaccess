@@ -1,19 +1,12 @@
-# Codex Dynamics - API Router for Hostinger Shared Hosting
 <IfModule mod_rewrite.c>
-  RewriteEngine On
-  RewriteBase /api/
-
-  # If requested file or directory exists, serve directly
-  RewriteCond %{REQUEST_FILENAME} -f [OR]
-  RewriteCond %{REQUEST_FILENAME} -d
-  RewriteRule ^ - [L]
-
-  # Route all other API requests to index.php
-  RewriteRule ^ index.php [QSA,L]
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ index.php [QSA,L]
 </IfModule>
 
-# Protect SQLite database files from browser downloads
-<FilesMatch "\.(sqlite|sqlite3|db)$">
-  Order deny,allow
-  Deny from all
+# Security: Deny direct access to config files
+<FilesMatch "^(config\.php|\.env)">
+    Order allow,deny
+    Deny from all
 </FilesMatch>

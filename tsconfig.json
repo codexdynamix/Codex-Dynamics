@@ -23,5 +23,7 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": ["src/**/*", "server.ts"],
+  "exclude": ["node_modules", "src/lib/auth", "src/lib/app-data"]
 }
