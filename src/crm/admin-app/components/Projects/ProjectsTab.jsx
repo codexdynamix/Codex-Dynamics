@@ -608,6 +608,8 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                 type="button"
                 onClick={() => setSearchQuery('')}
                 className="crm-inline-a81dd5579a"
+                aria-label="Clear project search"
+                title="Clear search"
               >
                 <X size={14} />
               </button>
@@ -641,19 +643,23 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                 type="button"
                 className={crmClassName(`crm-studio-tab-btn ${viewMode === 'grid' ? 'active' : ''}`, "crm-inline-c193781b87")}
                 onClick={() => setViewMode('grid')}
+                aria-label="Grid card view"
+                aria-pressed={viewMode === 'grid'}
                 title="Grid Card View"
-
               >
                 <LayoutGrid size={13} />
+                <span>Grid</span>
               </button>
               <button
                 type="button"
                 className={crmClassName(`crm-studio-tab-btn ${viewMode === 'table' ? 'active' : ''}`, "crm-inline-c193781b87")}
                 onClick={() => setViewMode('table')}
+                aria-label="Table view"
+                aria-pressed={viewMode === 'table'}
                 title="Table View"
-
               >
                 <List size={13} />
+                <span>Table</span>
               </button>
             </div>
           </div>
@@ -815,8 +821,10 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                           rel="noreferrer"
                           className="crm-proj-action-btn"
                           title="Open live client website"
+                          aria-label={`Open live website for ${proj.title}`}
                         >
                           <Globe size={13} />
+                          <span>Open site</span>
                         </a>
                       )}
 
@@ -825,8 +833,10 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                         className={`crm-proj-action-btn star ${proj.featured ? 'active' : ''}`}
                         onClick={(e) => handleToggleFeatured(proj.id, e)}
                         title={proj.featured ? 'Remove featured' : 'Mark as featured showcase'}
+                        aria-label={proj.featured ? `Remove ${proj.title} from featured showcase` : `Feature ${proj.title} on showcase`}
                       >
                         <Star size={13} fill={proj.featured ? 'currentColor' : 'none'} />
+                        <span>{proj.featured ? 'Featured' : 'Feature'}</span>
                       </button>
 
                       <button
@@ -834,8 +844,10 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                         className="crm-proj-action-btn"
                         onClick={(e) => handleTogglePublished(proj.id, e)}
                         title={proj.published ? 'Unpublish from main site' : 'Publish to main site'}
+                        aria-label={proj.published ? `Unpublish ${proj.title} from main site` : `Publish ${proj.title} to main site`}
                       >
                         {proj.published ? <Eye size={13} color="#0ECB81" /> : <EyeOff size={13} />}
+                        <span>{proj.published ? 'Unpublish' : 'Publish'}</span>
                       </button>
 
                       <button
@@ -843,8 +855,10 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                         className="crm-proj-action-btn"
                         onClick={(e) => handleDuplicateProject(proj, e)}
                         title="Duplicate project"
+                        aria-label={`Duplicate ${proj.title}`}
                       >
                         <Copy size={13} />
+                        <span>Duplicate</span>
                       </button>
 
                       <button
@@ -852,8 +866,10 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                         className="crm-proj-action-btn"
                         onClick={() => handleOpenEditModal(proj)}
                         title="Edit project details"
+                        aria-label={`Edit ${proj.title}`}
                       >
                         <Edit3 size={13} />
+                        <span>Edit</span>
                       </button>
 
                       <button
@@ -861,8 +877,10 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                         className="crm-proj-action-btn delete"
                         onClick={(e) => handleDeleteProject(proj.id, e)}
                         title="Delete project"
+                        aria-label={`Delete ${proj.title}`}
                       >
                         <Trash2 size={13} />
+                        <span>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -882,6 +900,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                 <th className="crm-inline-1c1995f34b">
                   <input
                     type="checkbox"
+                    aria-label="Select all filtered projects"
                     checked={filteredProjects.length > 0 && selectedIds.length === filteredProjects.length}
                     onChange={() => {
                       if (selectedIds.length === filteredProjects.length) {
@@ -909,6 +928,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                     <td className="crm-inline-72a68ac344">
                       <input
                         type="checkbox"
+                        aria-label={`Select ${proj.title}`}
                         checked={isSelected}
                         onChange={() => {
                           setSelectedIds(prev =>
@@ -950,7 +970,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                         type="button"
                         onClick={(e) => handleTogglePublished(proj.id, e)}
                         className={crmClassName(`crm-proj-status-badge ${proj.published ? 'published' : 'draft'}`, "crm-inline-4fc8e9a239")}
-
+                        aria-label={proj.published ? `Unpublish ${proj.title} from main site` : `Publish ${proj.title} to main site`}
                       >
                         {proj.published ? 'Live' : 'Draft'}
                       </button>
@@ -959,9 +979,13 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                       <button
                         type="button"
                         onClick={(e) => handleToggleFeatured(proj.id, e)}
-                        className="crm-inline-8c7950b676" style={{color: proj.featured ? 'var(--crm-accent)' : '#555D6C'}}
+                        className="crm-inline-8c7950b676"
+                        style={{color: proj.featured ? 'var(--crm-accent)' : '#555D6C'}}
+                        aria-label={proj.featured ? `Remove ${proj.title} from featured showcase` : `Feature ${proj.title} on showcase`}
+                        title={proj.featured ? 'Remove from featured showcase' : 'Feature on showcase'}
                       >
                         <Star size={16} fill={proj.featured ? 'var(--crm-accent)' : 'none'} />
+                        <span>{proj.featured ? 'Featured' : 'Feature'}</span>
                       </button>
                     </td>
                     <td className="crm-inline-13cbe03b9a">
@@ -971,16 +995,20 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                           className="crm-proj-action-btn"
                           onClick={() => handleOpenEditModal(proj)}
                           title="Edit"
+                          aria-label={`Edit ${proj.title}`}
                         >
                           <Edit3 size={12} />
+                          <span>Edit</span>
                         </button>
                         <button
                           type="button"
                           className="crm-proj-action-btn delete"
                           onClick={(e) => handleDeleteProject(proj.id, e)}
                           title="Delete"
+                          aria-label={`Delete ${proj.title}`}
                         >
                           <Trash2 size={12} />
+                          <span>Delete</span>
                         </button>
                       </div>
                     </td>
@@ -1024,6 +1052,8 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                 type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="crm-inline-7f5ada64a8"
+                aria-label="Close project form"
+                title="Close project form"
               >
                 <X size={18} />
               </button>
@@ -1141,6 +1171,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                       className="crm-proj-remove-img-btn"
                       onClick={() => setFormData({ ...formData, image: '' })}
                       title="Remove image"
+                      aria-label="Remove project image"
                     >
                       <X size={14} />
                     </button>

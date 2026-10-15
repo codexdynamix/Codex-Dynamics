@@ -509,39 +509,64 @@
 .crm-proj-card-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
-.crm-proj-action-btn {
+.crm-admin-app .crm-proj-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  gap: 5px;
+  min-height: 32px;
+  padding: 6px 9px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--crm-border, rgba(255, 255, 255, 0.08));
   color: var(--crm-text-secondary, #8E8E93);
+  box-shadow: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.crm-proj-action-btn:hover {
+.crm-admin-app .crm-proj-action-btn:hover {
   background: rgba(255, 255, 255, 0.12);
   color: var(--crm-text-primary, #FFFFFF);
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-.crm-proj-action-btn.star.active {
+.crm-admin-app .crm-proj-action-btn.star.active {
   color: #FF9F0A;
   background: rgba(255, 159, 10, 0.15);
   border-color: rgba(255, 159, 10, 0.4);
 }
 
-.crm-proj-action-btn.delete:hover {
+.crm-admin-app .crm-proj-action-btn.delete:hover {
   background: rgba(255, 69, 58, 0.15);
   color: #FF453A;
   border-color: rgba(255, 69, 58, 0.4);
+}
+
+.crm-admin-app .crm-proj-card-actions .crm-proj-action-btn svg {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  .crm-proj-card-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .crm-proj-card-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
 }
 
 /* ── Upload / Edit Modal ─────────────────────────────────────────────────── */

@@ -9260,7 +9260,6 @@
   .crm-small-btn,
   .crm-action-btn,
   .crm-pagination-btn-gold,
-  .crm-proj-action-btn,
   .crm-post-comment-btn
 ) {
   border-radius: var(--crm-ios-radius-control);
@@ -9270,7 +9269,7 @@
   font-size: 13.5px;
   transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), filter 0.15s ease, background-color 0.18s ease;
 }
-.crm-admin-app :is(.crm-super-admin-btn, .crm-btn-primary, .crm-super-admin-btn-small, .crm-proj-action-btn) {
+.crm-admin-app :is(.crm-super-admin-btn, .crm-btn-primary, .crm-super-admin-btn-small) {
   background: var(--crm-ios-blue);
   color: #FFFFFF;
   border: none;
@@ -9288,8 +9287,7 @@
   .crm-btn-secondary,
   .crm-super-admin-btn-secondary,
   .crm-small-btn,
-  .crm-action-btn,
-  .crm-proj-action-btn
+  .crm-action-btn
 ):not(:disabled):active {
   transform: scale(0.975);
 }

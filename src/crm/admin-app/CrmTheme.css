@@ -376,7 +376,7 @@
     color: var(--crm-text-primary);
   }
 
-  .crm-admin-app :is(.crm-super-admin-btn, .crm-btn-primary, .crm-super-admin-btn-small, .crm-proj-action-btn) {
+  .crm-admin-app :is(.crm-super-admin-btn, .crm-btn-primary, .crm-super-admin-btn-small) {
     border-radius: var(--crm-ios-radius-control);
     background: var(--crm-ios-blue);
     color: var(--crm-accent-fg, #FFFFFF);
