@@ -57,8 +57,11 @@ class MongoService {
         self::$databaseName = $dbName;
         self::$isExtensionLoaded = extension_loaded('mongodb');
 
-        if (!self::$isExtensionLoaded || !class_exists('MongoDB\\Client')) {
+        if (!self::$isExtensionLoaded) {
             jsonOut(['ok' => false, 'error' => 'MongoDB PHP support is required.'], 503);
+        }
+        if (!class_exists('MongoDB\\Client')) {
+            jsonOut(['ok' => false, 'error' => 'MongoDB PHP library is missing. Install the API Composer dependencies.'], 503);
         }
         if (!str_starts_with($uri, 'mongodb://') && !str_starts_with($uri, 'mongodb+srv://')) {
             jsonOut(['ok' => false, 'error' => 'MONGODB_URI is required to use this API.'], 503);

@@ -13,11 +13,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mongodb
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+
+      - name: Install MongoDB PHP library
+        run: composer update --no-dev --prefer-dist --working-dir=public/api
 
       - name: Build website
         run: |
