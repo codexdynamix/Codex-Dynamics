@@ -763,8 +763,41 @@ if ($path === '/admin/site-content' && $method === 'GET') {
 if ($path === '/admin/site-content/action' && $method === 'POST') {
     $type = $body['type'] ?? 'project';
     $col = $type === 'blog' ? 'blogs' : ($type === 'review' ? 'reviews' : 'projects');
-    $item = MongoService::insert($col, $body['item'] ?? []);
-    jsonOut(['ok' => true, 'item' => $item]);
+    $action = $body['action'] ?? '';
+    $item = $body['item'] ?? [];
+
+    if ($action === 'create' || $action === 'add') {
+        if (!is_array($item) || $item === []) {
+            jsonOut(['ok' => false, 'error' => 'A site-content item is required.'], 422);
+        }
+        $saved = MongoService::insert($col, $item);
+        jsonOut(['ok' => true, 'item' => $saved]);
+    }
+
+    if ($action === 'update' || $action === 'edit') {
+        $id = $body['id'] ?? ($item['id'] ?? null);
+        if ($id === null || $id === '' || !is_array($item) || $item === []) {
+            jsonOut(['ok' => false, 'error' => 'A site-content item id and item are required.'], 422);
+        }
+        if (MongoService::updateOne($col, ['id' => $id], $item) === 0) {
+            jsonOut(['ok' => false, 'error' => 'The site-content item was not found.'], 404);
+        }
+        jsonOut(['ok' => true, 'item' => $item]);
+    }
+
+    if ($action === 'delete') {
+        $id = $body['id'] ?? ($item['id'] ?? null);
+        if ($id === null || $id === '') {
+            jsonOut(['ok' => false, 'error' => 'A site-content item id is required.'], 422);
+        }
+        $deleted = MongoService::deleteOne($col, ['id' => $id]);
+        if ($deleted === 0) {
+            jsonOut(['ok' => false, 'error' => 'The site-content item was not found.'], 404);
+        }
+        jsonOut(['ok' => true, 'deleted' => $deleted]);
+    }
+
+    jsonOut(['ok' => false, 'error' => 'Unsupported site-content action.'], 400);
 }
 
 if ($path === '/admin/settings' || $path === '/crm/settings') {

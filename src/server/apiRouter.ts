@@ -711,15 +711,27 @@ apiRouter.post('/admin/site-content/action', async (req: Request, res: Response)
   }
   if (action === 'update' || action === 'edit') {
     const targetId = id || item?.id;
-    await col.updateOne({ $or: [{ id: targetId }, { _id: targetId }] }, { $set: item });
+    if (targetId === undefined || targetId === null || !item || typeof item !== 'object') {
+      return res.status(400).json({ ok: false, error: 'A project id and item are required.' });
+    }
+    const result = await col.updateOne({ $or: [{ id: targetId }, { _id: targetId }] }, { $set: item });
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ ok: false, error: 'The portfolio item was not found.' });
+    }
     return res.json({ ok: true, item });
   }
   if (action === 'delete') {
     const targetId = id || item?.id;
-    await col.deleteOne({ $or: [{ id: targetId }, { _id: targetId }] });
-    return res.json({ ok: true });
+    if (targetId === undefined || targetId === null || targetId === '') {
+      return res.status(400).json({ ok: false, error: 'A project id is required.' });
+    }
+    const result = await col.deleteOne({ $or: [{ id: targetId }, { _id: targetId }] });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ ok: false, error: 'The portfolio item was not found.' });
+    }
+    return res.json({ ok: true, deleted: result.deletedCount });
   }
-  res.json({ ok: true });
+  return res.status(400).json({ ok: false, error: 'Unsupported site-content action.' });
 });
 
 apiRouter.all('/admin/blog/categories', async (req: Request, res: Response) => {

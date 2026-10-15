@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { crmClassName } from "../../styleHelpers.js";
 import { SearchAutocomplete } from '../UserChrome.jsx';
+import { useConfirmDialog } from '../ConfirmModal/ConfirmModal.jsx';
 
 const CATEGORIES = [
   'All',
@@ -49,6 +50,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
   const [loadError, setLoadError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [confirmDialog, confirm] = useConfirmDialog();
 
   useEffect(() => {
     let active = true;
@@ -137,14 +139,15 @@ export default function ProjectsTab({ showNotification = () => {} }) {
     const idMap = new Map();
     try {
       for (const project of changed) {
-        const result = await runAdminSiteContentAction('save_showcase_project', {
+        const existing = projects.some((item) => String(item.id) === String(project.id));
+        const result = await runAdminSiteContentAction(existing ? 'update' : 'create', {
           ...project,
           is_published: project.published ? 1 : 0,
         });
-        idMap.set(String(project.id), result.id);
+        idMap.set(String(project.id), result.item?.id || result.id || project.id);
       }
       for (const project of removed) {
-        await runAdminSiteContentAction('delete_project', { id: project.id });
+        await runAdminSiteContentAction('delete', { id: project.id });
       }
       const saved = updatedProjects.map((project) => ({
         ...project,
@@ -291,25 +294,40 @@ export default function ProjectsTab({ showNotification = () => {} }) {
   // Delete single project
   const handleDeleteProject = async (id, e) => {
     e?.stopPropagation();
-    if (window.confirm('Are you sure you want to delete this project from the showcase?')) {
-      const updated = projects.filter(p => p.id !== id);
-      if (await persistAndBroadcast(updated)) {
-        setSelectedIds(prev => prev.filter(x => x !== id));
-        showNotification('Project archived.');
-      }
+    const project = projects.find((item) => String(item.id) === String(id));
+    if (!project) return;
+    const confirmed = await confirm({
+      title: 'Delete portfolio project?',
+      message: `“${project.title || 'Untitled project'}” will be permanently removed from the portfolio showcase.`,
+      confirmLabel: 'Delete project',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+
+    const updated = projects.filter((item) => String(item.id) !== String(id));
+    if (await persistAndBroadcast(updated)) {
+      setSelectedIds((previous) => previous.filter((selectedId) => String(selectedId) !== String(id)));
+      showNotification(`Deleted "${project.title || 'Untitled project'}" from the portfolio.`);
     }
   };
 
   // Bulk Delete
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) return;
-    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected project(s)?`)) {
-      const count = selectedIds.length;
-      const updated = projects.filter(p => !selectedIds.includes(p.id));
-      if (!(await persistAndBroadcast(updated))) return;
-      setSelectedIds([]);
-      showNotification(`Archived ${count} project(s).`);
-    }
+    const count = selectedIds.length;
+    const confirmed = await confirm({
+      title: `Delete ${count} portfolio project${count === 1 ? '' : 's'}?`,
+      message: 'The selected projects will be permanently removed from the portfolio showcase.',
+      confirmLabel: `Delete ${count} project${count === 1 ? '' : 's'}`,
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+
+    const selected = new Set(selectedIds.map(String));
+    const updated = projects.filter((project) => !selected.has(String(project.id)));
+    if (!(await persistAndBroadcast(updated))) return;
+    setSelectedIds([]);
+    showNotification(`Deleted ${count} project${count === 1 ? '' : 's'} from the portfolio.`);
   };
 
   // Bulk Publish / Unpublish
@@ -488,6 +506,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
 
   return (
     <div className="crm-projects-workspace">
+      {confirmDialog}
       {/* ── Top Header ────────────────────────────────────────── */}
       <div className="crm-proj-header">
         <div className="crm-proj-title-group">
