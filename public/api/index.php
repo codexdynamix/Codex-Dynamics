@@ -180,6 +180,147 @@ function hostingerMailApiRequest(string $token, string $endpoint = '/api/v1/me')
     return $decoded;
 }
 
+function hostingerMailApiRequestMethod(string $token, string $endpoint, string $method = 'GET', ?array $payload = null): array {
+    $headers = "Accept: application/json\r\nAuthorization: Bearer {$token}\r\n";
+    $content = '';
+    if ($payload !== null) {
+        $headers .= "Content-Type: application/json\r\n";
+        $content = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($content === false) {
+            jsonOut(['ok' => false, 'error' => 'Could not encode the Hostinger Mail request.'], 500);
+        }
+    }
+    $httpOptions = [
+        'method' => $method,
+        'header' => $headers,
+        'timeout' => 20,
+        'ignore_errors' => true,
+    ];
+    if ($payload !== null) $httpOptions['content'] = $content;
+    $context = stream_context_create(['http' => $httpOptions]);
+    $responseBody = file_get_contents('https://api.mail.hostinger.com' . $endpoint, false, $context);
+    $statusLine = $http_response_header[0] ?? '';
+    preg_match('/\s(\d{3})\s/', $statusLine, $statusMatch);
+    $status = (int)($statusMatch[1] ?? 0);
+    if ($responseBody === false || $status === 0) {
+        jsonOut(['ok' => false, 'error' => 'Could not reach the Hostinger Mail API. Check server outbound HTTPS connectivity and try again.'], 502);
+    }
+    $decoded = $responseBody === '' ? [] : json_decode($responseBody, true);
+    if ($status < 200 || $status >= 300) {
+        $message = is_array($decoded) ? (string)($decoded['error'] ?? $decoded['message'] ?? '') : '';
+        if ($status === 401 || $status === 403) {
+            $message = 'Hostinger rejected the API token or denied access to this mailbox.';
+        } elseif ($message === '') {
+            $message = "Hostinger Mail API returned HTTP {$status}.";
+        }
+        jsonOut(['ok' => false, 'error' => $message], 502);
+    }
+    if (!is_array($decoded)) {
+        jsonOut(['ok' => false, 'error' => 'Hostinger Mail API returned an unreadable response.'], 502);
+    }
+    return $decoded;
+}
+
+function hostingerMailApiBinaryRequest(string $token, string $endpoint): array {
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "Accept: */*\r\nAuthorization: Bearer {$token}\r\n",
+            'timeout' => 20,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $responseBody = file_get_contents('https://api.mail.hostinger.com' . $endpoint, false, $context);
+    $statusLine = $http_response_header[0] ?? '';
+    preg_match('/\s(\d{3})\s/', $statusLine, $statusMatch);
+    $status = (int)($statusMatch[1] ?? 0);
+    if ($responseBody === false || $status === 0) {
+        jsonOut(['ok' => false, 'error' => 'Could not reach the Hostinger Mail API.'], 502);
+    }
+    if ($status < 200 || $status >= 300) {
+        jsonOut(['ok' => false, 'error' => "Hostinger Mail API returned HTTP {$status}."], 502);
+    }
+    $contentType = 'application/octet-stream';
+    foreach ($http_response_header as $header) {
+        if (preg_match('/^Content-Type:\s*([a-z0-9.+-]+\/[a-z0-9.+-]+)/i', $header, $match)) {
+            $contentType = $match[1];
+            break;
+        }
+    }
+    return ['body' => $responseBody, 'contentType' => $contentType];
+}
+
+function portalMailSetSessionCookie(string $token): void {
+    $forwardedProto = strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $forwardedProto === 'https';
+    setcookie('cdx_portal_session', $token, [
+        'expires' => time() + 43200,
+        'path' => '/api/',
+        'secure' => $secure,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+function portalMailClientFromRequest(): array {
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    $authorization = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? $headers['Authorization'] ?? $headers['authorization'] ?? '');
+    $token = trim((string)($_COOKIE['cdx_portal_session'] ?? ''));
+    if ($token === '' && preg_match('/^Bearer\s+(.+)$/i', trim($authorization), $match)) {
+        $token = trim($match[1]);
+    }
+    if (!preg_match('/^cdx_portal_(?:php_mongo|impersonate)_(.+)_(\d{10})$/', $token, $tokenMatch)) {
+        jsonOut(['ok' => false, 'error' => 'Your portal session is invalid. Sign in again.'], 401);
+    }
+    $issuedAt = (int)$tokenMatch[2];
+    if ($issuedAt > time() + 60 || time() - $issuedAt > 43200) {
+        jsonOut(['ok' => false, 'error' => 'Your portal session has expired. Sign in again.'], 401);
+    }
+    $client = MongoService::findOne('clients', ['id' => $tokenMatch[1]]);
+    if (!$client || !hostingerMailClientIsActive($client)) {
+        jsonOut(['ok' => false, 'error' => 'The client portal account is unavailable.'], 401);
+    }
+    if (!(bool)($client['portalEnabled'] ?? $client['portal_enabled'] ?? false)) {
+        jsonOut(['ok' => false, 'error' => 'The client portal is disabled for this account.'], 403);
+    }
+    return $client;
+}
+
+function hostingerMailEnabledAssignment(string $clientId, string $resourceId): array {
+    $assignment = MongoService::findOne('client_mailboxes', [
+        'clientId' => $clientId,
+        'providerMailboxId' => $resourceId,
+    ]);
+    $enabled = $assignment['enabled'] ?? false;
+    if (!$assignment || !($enabled === true || $enabled === 1 || $enabled === '1')) {
+        jsonOut(['ok' => false, 'error' => 'This mailbox is not assigned and enabled for your client portal.'], 403);
+    }
+    return $assignment;
+}
+
+function hostingerMailPageQuery(): array {
+    return [
+        'page' => max(1, (int)($_GET['page'] ?? 1)),
+        'perPage' => min(100, max(1, (int)($_GET['perPage'] ?? 25))),
+    ];
+}
+
+function hostingerMailMessagesResult(array $response): array {
+    $messages = $response['data'] ?? [];
+    if (is_array($messages) && isset($messages['data']) && is_array($messages['data'])) {
+        $messages = $messages['data'];
+    }
+    return [
+        'messages' => is_array($messages) ? $messages : [],
+        'pagination' => $response['pagination'] ?? null,
+    ];
+}
+
+function hostingerMailDraftResponse(array $draft): array {
+    unset($draft['clientId'], $draft['mailboxId'], $draft['created_at']);
+    return $draft;
+}
+
 function hostingerMailApiData(array $response): array {
     $data = $response['data'] ?? $response;
     if (is_array($data) && isset($data['data']) && is_array($data['data'])) {
@@ -657,6 +798,7 @@ if ($path === '/portal/login' && $method === 'POST') {
         jsonOut(['ok' => false, 'error' => 'Client account not found in MongoDB.'], 401);
     }
     $token = 'cdx_portal_php_mongo_' . $client['id'] . '_' . time();
+    portalMailSetSessionCookie($token);
     jsonOut([
         'ok' => true,
         'token' => $token,
@@ -718,7 +860,20 @@ if (str_contains($path, '/impersonate') && $method === 'POST') {
     $client['company'] = (string)($client['company'] ?? '');
     $client['email'] = (string)($client['email'] ?? '');
     $token = 'cdx_portal_impersonate_' . $cid . '_' . time();
+    portalMailSetSessionCookie($token);
     jsonOut(['ok' => true, 'token' => $token, 'client' => $client]);
+}
+
+if ($path === '/portal/logout' && $method === 'POST') {
+    setcookie('cdx_portal_session', '', [
+        'expires' => time() - 3600,
+        'path' => '/api/',
+        'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https',
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    jsonOut(['ok' => true]);
 }
 
 if (str_contains($path, '/portal-password')) {
@@ -993,6 +1148,342 @@ if ($path === '/admin/messages') {
 if ($path === '/admin/audit') {
     $logs = MongoService::getCollection('audit_logs');
     jsonOut(['ok' => true, 'logs' => $logs]);
+}
+
+if ($path === '/portal/mailboxes' && $method === 'GET') {
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    $assignments = MongoService::getCollection('client_mailboxes', ['clientId' => $clientId], 100);
+    $mailboxes = [];
+    foreach ($assignments as $assignment) {
+        $enabled = $assignment['enabled'] ?? false;
+        if (!($enabled === true || $enabled === 1 || $enabled === '1')) continue;
+        $mailboxes[] = hostingerMailAssignmentResponse($assignment, $client);
+    }
+    jsonOut(['ok' => true, 'data' => ['mailboxes' => $mailboxes]]);
+}
+
+if ($path === '/portal/mail' || $path === '/portal/mail/reply') {
+    portalMailClientFromRequest();
+    jsonOut(['ok' => false, 'error' => 'No active Hostinger mailbox is assigned to this portal account.'], 409);
+}
+
+if (preg_match('#^/portal/mailboxes/([^/]+)(?:/(.*))?$#', $path, $mailRoute)) {
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    $resourceId = rawurldecode($mailRoute[1]);
+    $subPath = (string)($mailRoute[2] ?? '');
+    if ($resourceId === '') {
+        jsonOut(['ok' => false, 'error' => 'Mailbox resource ID is required.'], 400);
+    }
+    hostingerMailEnabledAssignment($clientId, $resourceId);
+    $integration = hostingerMailIntegration();
+    $token = trim((string)($integration['token'] ?? ''));
+    if ($token === '') {
+        jsonOut(['ok' => false, 'error' => 'Hostinger Mail is not configured. Contact your administrator.'], 503);
+    }
+    $providerMailbox = '/api/v1/mailboxes/' . rawurlencode($resourceId);
+
+    if ($subPath === 'folders' && $method === 'GET') {
+        $response = hostingerMailApiRequestMethod($token, $providerMailbox . '/folders');
+        $folders = hostingerMailApiData($response);
+        if (isset($folders['folders']) && is_array($folders['folders'])) $folders = $folders['folders'];
+        if (!array_is_list($folders)) {
+            jsonOut(['ok' => false, 'error' => 'Hostinger Mail returned an unreadable folder list.'], 502);
+        }
+        jsonOut(['ok' => true, 'data' => ['folders' => $folders]]);
+    }
+
+    if ($subPath === 'quota' && $method === 'GET') {
+        $response = hostingerMailApiRequestMethod($token, $providerMailbox . '/quota');
+        jsonOut(['ok' => true, 'data' => ['quota' => hostingerMailApiData($response)]]);
+    }
+
+    if ($subPath === 'send' && $method === 'POST') {
+        $recipients = [];
+        foreach (['to', 'cc', 'bcc'] as $field) {
+            $items = $body[$field] ?? [];
+            if (!is_array($items)) {
+                jsonOut(['ok' => false, 'error' => 'Email recipients must be provided as address lists.'], 422);
+            }
+            foreach ($items as $address) {
+                $address = trim((string)$address);
+                if ($address !== '' && filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
+                    jsonOut(['ok' => false, 'error' => 'One or more recipient email addresses are invalid.'], 422);
+                }
+                if ($address !== '') $recipients[] = $address;
+            }
+        }
+        if (!$recipients) {
+            jsonOut(['ok' => false, 'error' => 'Add at least one email recipient.'], 422);
+        }
+        if (!empty($body['sendIndividually'])) {
+            $individualRecipients = array_values(array_unique(array_map(
+                static fn(mixed $address): string => strtolower(trim((string)$address)),
+                is_array($body['to'] ?? null) ? $body['to'] : []
+            )));
+            $individualRecipients = array_values(array_filter($individualRecipients, static fn(string $address): bool => $address !== ''));
+            if (!$individualRecipients || count($individualRecipients) > 50) {
+                jsonOut(['ok' => false, 'error' => 'Individual sending requires 1 to 50 To recipients.'], 422);
+            }
+            $sent = 0;
+            foreach ($individualRecipients as $address) {
+                $single = $body;
+                unset($single['sendIndividually'], $single['cc'], $single['bcc']);
+                $single['to'] = [$address];
+                hostingerMailApiRequestMethod($token, $providerMailbox . '/send', 'POST', $single);
+                $sent++;
+            }
+            jsonOut(['ok' => true, 'data' => ['message' => "Sent {$sent} individual email(s).", 'sentCount' => $sent, 'failed' => []]]);
+        }
+        unset($body['sendIndividually']);
+        $response = hostingerMailApiRequestMethod($token, $providerMailbox . '/send', 'POST', $body);
+        jsonOut(['ok' => true, 'data' => hostingerMailApiData($response)]);
+    }
+
+    if ($subPath === 'drafts' && $method === 'GET') {
+        $storedDrafts = MongoService::getCollection('portal_mail_drafts', [
+            'clientId' => $clientId,
+            'mailboxId' => $resourceId,
+        ], 500, 0, ['updatedAt' => -1]);
+        $drafts = array_map('hostingerMailDraftResponse', $storedDrafts);
+        jsonOut(['ok' => true, 'data' => ['drafts' => $drafts]]);
+    }
+
+    if ($subPath === 'drafts' && $method === 'POST') {
+        $draftId = trim((string)($body['id'] ?? ''));
+        if ($draftId === '') $draftId = 'draft_' . bin2hex(random_bytes(12));
+        $now = date('c');
+        $storedDraft = [
+            'id' => $draftId,
+            'clientId' => $clientId,
+            'mailboxId' => $resourceId,
+            'to' => is_array($body['to'] ?? null) ? $body['to'] : [],
+            'cc' => is_array($body['cc'] ?? null) ? $body['cc'] : [],
+            'bcc' => is_array($body['bcc'] ?? null) ? $body['bcc'] : [],
+            'subject' => (string)($body['subject'] ?? ''),
+            'text' => (string)($body['text'] ?? ''),
+            'attachments' => is_array($body['attachments'] ?? null) ? $body['attachments'] : [],
+            'updatedAt' => $now,
+        ];
+        foreach (['html', 'inReplyTo', 'forwardOf'] as $field) {
+            if (isset($body[$field])) $storedDraft[$field] = $body[$field];
+        }
+        $existingDraft = MongoService::findOne('portal_mail_drafts', [
+            'id' => $draftId,
+            'clientId' => $clientId,
+            'mailboxId' => $resourceId,
+        ]);
+        if ($existingDraft) {
+            MongoService::updateOne('portal_mail_drafts', [
+                'id' => $draftId,
+                'clientId' => $clientId,
+                'mailboxId' => $resourceId,
+            ], $storedDraft);
+        } else {
+            $storedDraft['created_at'] = $now;
+            MongoService::insert('portal_mail_drafts', $storedDraft);
+        }
+        jsonOut(['ok' => true, 'data' => ['draft' => hostingerMailDraftResponse($storedDraft)]]);
+    }
+
+    if (preg_match('#^drafts/([^/]+)$#', $subPath, $draftMatch) && $method === 'DELETE') {
+        $draftId = rawurldecode($draftMatch[1]);
+        $deleted = MongoService::deleteOne('portal_mail_drafts', [
+            'id' => $draftId,
+            'clientId' => $clientId,
+            'mailboxId' => $resourceId,
+        ]);
+        if ($deleted === 0) {
+            jsonOut(['ok' => false, 'error' => 'Draft not found.'], 404);
+        }
+        jsonOut(['ok' => true, 'data' => ['deleted' => $deleted]]);
+    }
+
+    if ($subPath === 'blocked-senders' && $method === 'GET') {
+        $blocked = MongoService::getCollection('portal_blocked_senders', [
+            'clientId' => $clientId,
+            'mailboxId' => $resourceId,
+        ], 1000, 0, ['blockedAt' => -1]);
+        $blockedSenders = array_map(static fn(array $item): array => [
+            'address' => (string)($item['address'] ?? ''),
+            'blockedAt' => (string)($item['blockedAt'] ?? ''),
+        ], $blocked);
+        jsonOut(['ok' => true, 'data' => ['blockedSenders' => $blockedSenders]]);
+    }
+
+    if ($subPath === 'blocked-senders' && in_array($method, ['POST', 'DELETE'], true)) {
+        $address = strtolower(trim((string)($body['address'] ?? '')));
+        if (filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
+            jsonOut(['ok' => false, 'error' => 'Enter a valid sender email address.'], 422);
+        }
+        $blockedFilter = ['clientId' => $clientId, 'mailboxId' => $resourceId, 'address' => $address];
+        if ($method === 'POST' && MongoService::findOne('portal_blocked_senders', $blockedFilter) === null) {
+            MongoService::insert('portal_blocked_senders', $blockedFilter + ['blockedAt' => date('c')]);
+        } elseif ($method === 'DELETE') {
+            MongoService::deleteOne('portal_blocked_senders', $blockedFilter);
+        }
+        $blocked = MongoService::getCollection('portal_blocked_senders', [
+            'clientId' => $clientId,
+            'mailboxId' => $resourceId,
+        ], 1000, 0, ['blockedAt' => -1]);
+        $blockedSenders = array_map(static fn(array $item): array => [
+            'address' => (string)($item['address'] ?? ''),
+            'blockedAt' => (string)($item['blockedAt'] ?? ''),
+        ], $blocked);
+        $message = $method === 'POST'
+            ? 'Sender added to this portal’s blocked-sender list.'
+            : 'Sender removed from this portal’s blocked-sender list.';
+        jsonOut(['ok' => true, 'data' => ['message' => $message, 'blockedSenders' => $blockedSenders]]);
+    }
+
+    if ($subPath === 'starred' && $method === 'GET') {
+        $folderResponse = hostingerMailApiRequestMethod($token, $providerMailbox . '/folders');
+        $folders = hostingerMailApiData($folderResponse);
+        if (isset($folders['folders']) && is_array($folders['folders'])) $folders = $folders['folders'];
+        $allMessages = [];
+        foreach ($folders as $folder) {
+            $folderPath = (string)($folder['path'] ?? '');
+            if ($folderPath === '') continue;
+            $endpoint = $providerMailbox . '/folders/' . rawurlencode($folderPath) . '/messages/search';
+            $endpoint .= '?' . http_build_query(['page' => 1, 'perPage' => 100], '', '&', PHP_QUERY_RFC3986);
+            $response = hostingerMailApiRequestMethod($token, $endpoint, 'POST', ['flags' => ['\\Flagged']]);
+            $allMessages = array_merge($allMessages, hostingerMailMessagesResult($response)['messages']);
+        }
+        usort($allMessages, static fn(array $a, array $b): int => strcmp((string)($b['date'] ?? ''), (string)($a['date'] ?? '')));
+        $page = hostingerMailPageQuery();
+        $total = count($allMessages);
+        $messages = array_slice($allMessages, ($page['page'] - 1) * $page['perPage'], $page['perPage']);
+        jsonOut(['ok' => true, 'data' => [
+            'messages' => $messages,
+            'pagination' => [
+                'page' => $page['page'],
+                'perPage' => $page['perPage'],
+                'total' => $total,
+                'totalPages' => (int)ceil($total / $page['perPage']),
+            ],
+        ]]);
+    }
+
+    if (preg_match('#^folders/([^/]+)/messages(?:/([^/]+)(?:/([^/]+)(?:/([^/]+))?)?)?$#', $subPath, $messageRoute)) {
+        $folder = rawurldecode($messageRoute[1]);
+        $messagePart = rawurldecode((string)($messageRoute[2] ?? ''));
+        $actionPart = rawurldecode((string)($messageRoute[3] ?? ''));
+        $attachmentId = rawurldecode((string)($messageRoute[4] ?? ''));
+        $messagesEndpoint = $providerMailbox . '/folders/' . rawurlencode($folder) . '/messages';
+
+        if ($messagePart === '' && $method === 'GET') {
+            $query = hostingerMailPageQuery() + ['sort' => '-uid'];
+            $response = hostingerMailApiRequestMethod($token, $messagesEndpoint . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986));
+            jsonOut(['ok' => true, 'data' => hostingerMailMessagesResult($response)]);
+        }
+        if ($messagePart === 'search' && $method === 'POST') {
+            $text = trim((string)($body['text'] ?? ''));
+            $query = hostingerMailPageQuery();
+            $response = hostingerMailApiRequestMethod(
+                $token,
+                $messagesEndpoint . '/search?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986),
+                'POST',
+                ['text' => $text]
+            );
+            jsonOut(['ok' => true, 'data' => hostingerMailMessagesResult($response)]);
+        }
+        if ($messagePart === 'bulk' && $method === 'POST') {
+            $uids = array_values(array_unique(array_filter(
+                is_array($body['uids'] ?? null) ? array_map('intval', $body['uids']) : [],
+                static fn(int $uid): bool => $uid > 0
+            )));
+            if (!$uids || count($uids) > 100) {
+                jsonOut(['ok' => false, 'error' => 'Select between 1 and 100 messages.'], 422);
+            }
+            $action = (string)($body['action'] ?? '');
+            if ($action === 'move') {
+                $targetFolder = trim((string)($body['targetFolder'] ?? ''));
+                if ($targetFolder === '') jsonOut(['ok' => false, 'error' => 'Choose a destination folder.'], 422);
+                $response = hostingerMailApiRequestMethod($token, $messagesEndpoint . '/move', 'POST', [
+                    'uids' => $uids,
+                    'targetFolder' => $targetFolder,
+                ]);
+            } elseif ($action === 'delete') {
+                if (($body['confirmed'] ?? false) !== true) {
+                    jsonOut(['ok' => false, 'error' => 'Message deletion requires confirmation.'], 422);
+                }
+                $response = hostingerMailApiRequestMethod($token, $messagesEndpoint . '/delete', 'POST', ['uids' => $uids]);
+            } elseif ($action === 'flags') {
+                $flags = array_filter([
+                    'uids' => $uids,
+                    'addFlags' => is_array($body['addFlags'] ?? null) ? array_values($body['addFlags']) : [],
+                    'removeFlags' => is_array($body['removeFlags'] ?? null) ? array_values($body['removeFlags']) : [],
+                ], static fn(mixed $value): bool => $value !== []);
+                if (!isset($flags['addFlags']) && !isset($flags['removeFlags'])) {
+                    jsonOut(['ok' => false, 'error' => 'Choose a message flag to update.'], 422);
+                }
+                $response = hostingerMailApiRequestMethod($token, $messagesEndpoint . '/flags', 'POST', $flags);
+            } else {
+                jsonOut(['ok' => false, 'error' => 'Unsupported bulk mail action.'], 422);
+            }
+            $result = hostingerMailApiData($response);
+            jsonOut(['ok' => true, 'data' => [
+                'message' => (string)($result['message'] ?? 'Hostinger Mail updated the selected messages.'),
+                'failed' => (int)($result['failed'] ?? 0),
+            ]]);
+        }
+        if ($messagePart === '' && $method === 'DELETE') {
+            if (($body['confirmed'] ?? false) !== true) {
+                jsonOut(['ok' => false, 'error' => 'Emptying a folder requires confirmation.'], 422);
+            }
+            $response = hostingerMailApiRequestMethod($token, $messagesEndpoint, 'DELETE');
+            jsonOut(['ok' => true, 'data' => hostingerMailApiData($response)]);
+        }
+        if (ctype_digit($messagePart)) {
+            $uid = (int)$messagePart;
+            if ($uid < 1) jsonOut(['ok' => false, 'error' => 'A valid message UID is required.'], 400);
+            $messageEndpoint = $messagesEndpoint . '/' . $uid;
+            if ($actionPart === '' && $method === 'GET') {
+                $messageResponse = hostingerMailApiRequestMethod($token, $messageEndpoint);
+                $textResponse = hostingerMailApiRequestMethod($token, $messageEndpoint . '/text');
+                jsonOut(['ok' => true, 'data' => [
+                    'message' => hostingerMailApiData($messageResponse),
+                    'body' => hostingerMailApiData($textResponse),
+                ]]);
+            }
+            if ($actionPart === '' && $method === 'PATCH') {
+                $flags = [
+                    'addFlags' => is_array($body['addFlags'] ?? null) ? array_values($body['addFlags']) : [],
+                    'removeFlags' => is_array($body['removeFlags'] ?? null) ? array_values($body['removeFlags']) : [],
+                ];
+                if (!$flags['addFlags'] && !$flags['removeFlags']) {
+                    jsonOut(['ok' => false, 'error' => 'Choose a message flag to update.'], 422);
+                }
+                $response = hostingerMailApiRequestMethod($token, $messageEndpoint, 'PATCH', $flags);
+                jsonOut(['ok' => true, 'data' => hostingerMailApiData($response)]);
+            }
+            if ($actionPart === 'move' && $method === 'POST') {
+                $targetFolder = trim((string)($body['targetFolder'] ?? ''));
+                if ($targetFolder === '') jsonOut(['ok' => false, 'error' => 'Choose a destination folder.'], 422);
+                $response = hostingerMailApiRequestMethod($token, $messageEndpoint . '/move', 'POST', ['targetFolder' => $targetFolder]);
+                jsonOut(['ok' => true, 'data' => hostingerMailApiData($response)]);
+            }
+            if ($actionPart === '' && $method === 'DELETE') {
+                if (($body['confirmed'] ?? false) !== true) {
+                    jsonOut(['ok' => false, 'error' => 'Message deletion requires confirmation.'], 422);
+                }
+                $response = hostingerMailApiRequestMethod($token, $messageEndpoint, 'DELETE');
+                jsonOut(['ok' => true, 'data' => hostingerMailApiData($response)]);
+            }
+            if ($actionPart === 'attachments' && $attachmentId !== '' && $method === 'GET') {
+                $attachment = hostingerMailApiBinaryRequest(
+                    $token,
+                    $messageEndpoint . '/attachments/' . rawurlencode($attachmentId)
+                );
+                header('Content-Type: ' . $attachment['contentType']);
+                header('Content-Disposition: attachment');
+                sendCors();
+                echo $attachment['body'];
+                exit;
+            }
+        }
+    }
 }
 
 // Do not report success for routes that have no implementation.

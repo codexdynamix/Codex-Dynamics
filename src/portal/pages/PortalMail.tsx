@@ -496,13 +496,13 @@ export function PortalMail({ client }: PortalMailProps) {
   };
 
   const blockSender = async (mailboxId: string, address: string) => {
-    if (!window.confirm(`Block ${address}? Existing and future emails from this sender will be moved to Spam for this mailbox.`)) return;
+    if (!window.confirm(`Add ${address} to this portal's blocked-sender list? This is a portal-side list only; Hostinger delivery and future incoming mail will not be changed.`)) return;
     setBusy(true);
     setError('');
     try {
       const result = await blockPortalSender(mailboxId, address);
       setBlockedMap(map => ({ ...map, [mailboxId]: result.blockedSenders || [] }));
-      setNotice(result.message || 'Sender blocked.');
+      setNotice(result.message || 'Sender added to the portal blocked-sender list.');
       if (selected && (selected.from?.address || '').toLowerCase() === address.toLowerCase() && roleOf(folderMapRef.current[mailboxId] || [], selected.path) === 'inbox') {
         setSelected(null);
         setMobileReader(false);
