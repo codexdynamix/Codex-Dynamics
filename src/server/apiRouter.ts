@@ -369,24 +369,41 @@ apiRouter.delete('/admin/teams/:id', async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 // 4. CLIENT MANAGEMENT & DISTRIBUTION (CRM)
 // ---------------------------------------------------------------------------
+function clientDeletionFilter(includeDeleted: unknown): Record<string, unknown> {
+  const mode = String(includeDeleted || '');
+  if (mode === '1') return {};
+  if (mode === 'only') {
+    return { $or: [{ is_bin: true }, { deleted_at: { $ne: null } }] };
+  }
+  return { $nor: [{ is_bin: true }, { deleted_at: { $ne: null } }] };
+}
+
 apiRouter.get('/admin/clients', async (_req: Request, res: Response) => {
-  const clients = await getMongoCollection('clients').find();
+  const clients = await getMongoCollection('clients').find(
+    clientDeletionFilter(_req.query.include_deleted)
+  );
   res.json({ ok: true, clients, total: clients.length, hasMore: false });
 });
 
 apiRouter.get('/admin/clients/search', async (req: Request, res: Response) => {
   const q = String(req.query.q || '').trim();
   const clientsCol = getMongoCollection('clients');
+  const activeClients = clientDeletionFilter(undefined);
   if (!q) {
-    const clients = await clientsCol.find({}, { limit: 10 });
+    const clients = await clientsCol.find(activeClients, { limit: 10 });
     return res.json({ ok: true, clients });
   }
   const clients = await clientsCol.find({
-    $or: [
-      { name: { $regex: q, $options: 'i' } },
-      { company: { $regex: q, $options: 'i' } },
-      { email: { $regex: q, $options: 'i' } },
-      { phone: { $regex: q, $options: 'i' } },
+    $and: [
+      activeClients,
+      {
+        $or: [
+          { name: { $regex: q, $options: 'i' } },
+          { company: { $regex: q, $options: 'i' } },
+          { email: { $regex: q, $options: 'i' } },
+          { phone: { $regex: q, $options: 'i' } },
+        ],
+      },
     ],
   });
   res.json({ ok: true, clients });
@@ -429,13 +446,30 @@ apiRouter.patch('/admin/clients/:id', async (req: Request, res: Response) => {
 });
 
 apiRouter.delete('/admin/clients/:id', async (req: Request, res: Response) => {
-  await getMongoCollection('clients').updateOne({ id: req.params.id }, { $set: { deleted_at: new Date().toISOString(), is_bin: true } });
-  res.json({ ok: true });
+  const clients = getMongoCollection('clients');
+  if (req.query.permanent === '1') {
+    const result = await clients.deleteOne({ id: req.params.id });
+    if (!result.deletedCount) return res.status(404).json({ ok: false, error: 'Client not found.' });
+    return res.json({ ok: true, deleted: true });
+  }
+
+  const result = await clients.updateOne(
+    { id: req.params.id },
+    { $set: { deleted_at: new Date().toISOString(), is_bin: true } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  return res.json({ ok: true });
 });
 
 apiRouter.post('/admin/clients/:id/restore', async (req: Request, res: Response) => {
-  await getMongoCollection('clients').updateOne({ id: req.params.id }, { $set: { deleted_at: null, is_bin: false } });
-  res.json({ ok: true });
+  const clients = getMongoCollection('clients');
+  const result = await clients.updateOne(
+    { id: req.params.id },
+    { $set: { deleted_at: null, is_bin: false } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  const client = await clients.findOne({ id: req.params.id });
+  return res.json({ ok: true, client });
 });
 
 apiRouter.post('/admin/clients/:id/impersonate', async (req: Request, res: Response) => {
@@ -499,7 +533,9 @@ apiRouter.all('/admin/clients/:id/profile-permissions', async (req: Request, res
 });
 
 apiRouter.all('/admin/users', async (req: Request, res: Response) => {
-  const clients = await getMongoCollection('clients').find();
+  const clients = await getMongoCollection('clients').find(
+    clientDeletionFilter(req.query.include_deleted)
+  );
   res.json({ ok: true, users: clients, clients });
 });
 
