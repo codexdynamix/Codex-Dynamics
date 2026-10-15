@@ -88,9 +88,9 @@ class MongoService {
         return self::$databaseName;
     }
 
-    public static function getCollection(string $name): array {
+    public static function getCollection(string $name, array $filter = [], int $limit = 200, int $skip = 0): array {
         $col = self::$client->selectDatabase(self::$databaseName)->selectCollection($name);
-        $cursor = $col->find([], ['limit' => 200]);
+        $cursor = $col->find($filter, ['limit' => $limit, 'skip' => $skip]);
         $results = [];
         foreach ($cursor as $doc) {
             $arr = (array)$doc;
@@ -98,6 +98,29 @@ class MongoService {
             $results[] = $arr;
         }
         return $results;
+    }
+
+    public static function updateOne(string $name, array $filter, array $updates): int {
+        $result = self::$client
+            ->selectDatabase(self::$databaseName)
+            ->selectCollection($name)
+            ->updateOne($filter, ['$set' => $updates]);
+        return $result->getMatchedCount();
+    }
+
+    public static function deleteOne(string $name, array $filter): int {
+        $result = self::$client
+            ->selectDatabase(self::$databaseName)
+            ->selectCollection($name)
+            ->deleteOne($filter);
+        return $result->getDeletedCount();
+    }
+
+    public static function countDocuments(string $name, array $filter = []): int {
+        return self::$client
+            ->selectDatabase(self::$databaseName)
+            ->selectCollection($name)
+            ->countDocuments($filter);
     }
 
     public static function insert(string $name, array $doc): array {
@@ -207,13 +230,50 @@ if ($path === '/admin/logout') {
 
 // 3. Admin Clients
 if ($path === '/admin/clients' && $method === 'GET') {
-    $clients = MongoService::getCollection('clients');
-    jsonOut(['ok' => true, 'clients' => $clients, 'total' => count($clients), 'hasMore' => false]);
+    $includeDeleted = (string)($_GET['include_deleted'] ?? '');
+    if ($includeDeleted === '1') {
+        $filter = [];
+    } elseif ($includeDeleted === 'only') {
+        $filter = ['$or' => [
+            ['is_bin' => true],
+            ['deleted_at' => ['$exists' => true, '$nin' => [null, '']]],
+        ]];
+    } else {
+        $filter = ['$and' => [
+            ['is_bin' => ['$ne' => true]],
+            ['$or' => [
+                ['deleted_at' => ['$exists' => false]],
+                ['deleted_at' => null],
+                ['deleted_at' => ''],
+            ]],
+        ]];
+    }
+    $limit = min(max((int)($_GET['limit'] ?? 500), 1), 10000);
+    $offset = max((int)($_GET['offset'] ?? 0), 0);
+    $total = MongoService::countDocuments('clients', $filter);
+    $clients = MongoService::getCollection('clients', $filter, $limit, $offset);
+    jsonOut([
+        'ok' => true,
+        'clients' => $clients,
+        'total' => $total,
+        'limit' => $limit,
+        'offset' => $offset,
+        'hasMore' => $offset + count($clients) < $total,
+    ]);
 }
 
 if (str_starts_with($path, '/admin/clients/search')) {
     $q = strtolower(trim((string)($_GET['q'] ?? '')));
-    $all = MongoService::getCollection('clients');
+    $all = MongoService::getCollection('clients', [
+        '$and' => [
+            ['is_bin' => ['$ne' => true]],
+            ['$or' => [
+                ['deleted_at' => ['$exists' => false]],
+                ['deleted_at' => null],
+                ['deleted_at' => ''],
+            ]],
+        ],
+    ]);
     if ($q === '') {
         jsonOut(['ok' => true, 'clients' => array_slice($all, 0, 10)]);
     }
@@ -247,6 +307,59 @@ if ($path === '/admin/clients/import' && $method === 'POST') {
         $imported[] = MongoService::insert('clients', $c);
     }
     jsonOut(['ok' => true, 'count' => count($imported), 'imported' => count($imported), 'clients' => $imported]);
+}
+
+if (preg_match('#^/admin/clients/([^/]+)(?:/(restore))?$#', $path, $matches)) {
+    $clientId = rawurldecode($matches[1]);
+    $isRestore = ($matches[2] ?? '') === 'restore';
+
+    if ($isRestore && $method === 'POST') {
+        if (MongoService::updateOne('clients', ['id' => $clientId], [
+            'deleted_at' => null,
+            'is_bin' => false,
+        ]) === 0) {
+            jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+        }
+        jsonOut([
+            'ok' => true,
+            'client' => MongoService::findOne('clients', ['id' => $clientId]),
+        ]);
+    }
+
+    if (!$isRestore && $method === 'GET') {
+        $client = MongoService::findOne('clients', ['id' => $clientId]);
+        if ($client === null) jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+        jsonOut(['ok' => true, 'client' => $client]);
+    }
+
+    if (!$isRestore && $method === 'PATCH') {
+        if (MongoService::updateOne('clients', ['id' => $clientId], $body) === 0) {
+            jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+        }
+        jsonOut([
+            'ok' => true,
+            'client' => MongoService::findOne('clients', ['id' => $clientId]),
+        ]);
+    }
+
+    if (!$isRestore && $method === 'DELETE') {
+        if (($_GET['permanent'] ?? '') === '1') {
+            if (MongoService::deleteOne('clients', ['id' => $clientId]) === 0) {
+                jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+            }
+            jsonOut(['ok' => true, 'deleted' => true]);
+        }
+
+        if (MongoService::updateOne('clients', ['id' => $clientId], [
+            'deleted_at' => date('c'),
+            'is_bin' => true,
+        ]) === 0) {
+            jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+        }
+        jsonOut(['ok' => true]);
+    }
+
+    jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
 }
 
 // 4. Content & Settings
@@ -418,5 +531,5 @@ if ($path === '/admin/audit') {
     jsonOut(['ok' => true, 'logs' => $logs]);
 }
 
-// Default fallback
-jsonOut(['ok' => true, 'path' => $path, 'storage' => 'mongodb']);
+// Do not report success for routes that have no implementation.
+jsonOut(['ok' => false, 'error' => 'Route not found.'], 404);
