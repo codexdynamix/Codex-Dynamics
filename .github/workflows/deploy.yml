@@ -17,10 +17,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Build website
         run: |
-          npm install --no-package-lock
+          npm ci
           npm run build
 
       - name: Deploy website to Hostinger
