@@ -148,7 +148,7 @@ class MongoService {
 
 MongoService::init($mongoUri, $mongoDbName);
 
-function hostingerMailApiRequest(string $token): array {
+function hostingerMailApiRequest(string $token, string $endpoint = '/api/v1/me'): array {
     $context = stream_context_create([
         'http' => [
             'method' => 'GET',
@@ -157,7 +157,7 @@ function hostingerMailApiRequest(string $token): array {
             'ignore_errors' => true,
         ],
     ]);
-    $responseBody = file_get_contents('https://api.mail.hostinger.com/api/v1/me', false, $context);
+    $responseBody = file_get_contents('https://api.mail.hostinger.com' . $endpoint, false, $context);
     $statusLine = $http_response_header[0] ?? '';
     preg_match('/\s(\d{3})\s/', $statusLine, $statusMatch);
     $status = (int)($statusMatch[1] ?? 0);
@@ -178,6 +178,54 @@ function hostingerMailApiRequest(string $token): array {
         jsonOut(['ok' => false, 'error' => 'Hostinger Mail API returned an unreadable response.'], 502);
     }
     return $decoded;
+}
+
+function hostingerMailApiData(array $response): array {
+    $data = $response['data'] ?? $response;
+    if (is_array($data) && isset($data['data']) && is_array($data['data'])) {
+        $data = $data['data'];
+    }
+    return is_array($data) ? $data : [];
+}
+
+function hostingerMailIntegration(): array {
+    return MongoService::findOne('hostinger_mail_integrations', []) ?: [];
+}
+
+function hostingerMailMailboxList(array $integration): array {
+    $token = trim((string)($integration['token'] ?? ''));
+    if ($token === '') {
+        jsonOut(['ok' => false, 'error' => 'Hostinger Mail API is not configured. Save a valid token first.'], 503);
+    }
+    $account = hostingerMailApiData(hostingerMailApiRequest($token));
+    if (!is_array($account['mailboxes'] ?? null)) {
+        jsonOut(['ok' => false, 'error' => 'Hostinger Mail API did not return a mailbox list.'], 502);
+    }
+    return $account['mailboxes'];
+}
+
+function hostingerMailClientIsActive(array $client): bool {
+    return !((bool)($client['is_bin'] ?? false))
+        && (!isset($client['deleted_at']) || $client['deleted_at'] === '');
+}
+
+function hostingerMailAssignmentResponse(array $assignment, ?array $client = null): array {
+    return [
+        'id' => (string)($assignment['id'] ?? ''),
+        'clientId' => (string)($assignment['clientId'] ?? ''),
+        'providerMailboxId' => (string)($assignment['providerMailboxId'] ?? ''),
+        'emailAddress' => (string)($assignment['emailAddress'] ?? ''),
+        'displayName' => (string)($assignment['displayName'] ?? $assignment['emailAddress'] ?? ''),
+        'enabled' => (bool)($assignment['enabled'] ?? false),
+        'createdAt' => $assignment['createdAt'] ?? null,
+        'updatedAt' => $assignment['updatedAt'] ?? null,
+        'clientName' => $client['name'] ?? null,
+        'clientEmail' => $client['email'] ?? null,
+        'clientCompany' => $client['company'] ?? null,
+        'portalActive' => $client === null
+            ? false
+            : (bool)($client['portalEnabled'] ?? $client['portal_enabled'] ?? false),
+    ];
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +378,140 @@ if (str_starts_with($path, '/admin/clients/search')) {
         return str_contains(strtolower($c['name'] ?? ''), $q) || str_contains(strtolower($c['email'] ?? ''), $q);
     }));
     jsonOut(['ok' => true, 'clients' => $filtered]);
+}
+
+if (preg_match('#^/admin/clients/([^/]+)/mailboxes(?:/([^/]+))?$#', $path, $matches)) {
+    $clientId = rawurldecode($matches[1]);
+    $assignmentId = isset($matches[2]) ? rawurldecode($matches[2]) : null;
+    $client = MongoService::findOne('clients', ['id' => $clientId]);
+    if ($client === null || !hostingerMailClientIsActive($client)) {
+        jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+    }
+
+    if ($assignmentId === null && $method === 'GET') {
+        $assignments = MongoService::getCollection('client_mailboxes', ['clientId' => $clientId], 1000);
+        jsonOut([
+            'ok' => true,
+            'mailboxes' => array_map(
+                static fn(array $assignment): array => hostingerMailAssignmentResponse($assignment, $client),
+                $assignments
+            ),
+        ]);
+    }
+
+    if ($assignmentId === null && $method === 'POST') {
+        $providerMailboxId = trim((string)($body['providerMailboxId'] ?? ''));
+        if ($providerMailboxId === '') {
+            jsonOut(['ok' => false, 'error' => 'Choose a Hostinger mailbox to assign.'], 422);
+        }
+        $providerMailboxes = hostingerMailMailboxList(hostingerMailIntegration());
+        $providerMailbox = null;
+        foreach ($providerMailboxes as $mailbox) {
+            if ((string)($mailbox['resourceId'] ?? '') === $providerMailboxId) {
+                $providerMailbox = $mailbox;
+                break;
+            }
+        }
+        if ($providerMailbox === null) {
+            jsonOut(['ok' => false, 'error' => 'That mailbox is not available in the connected Hostinger account. Sync mailboxes and try again.'], 422);
+        }
+        $existing = MongoService::findOne('client_mailboxes', ['providerMailboxId' => $providerMailboxId]);
+        if ($existing !== null) {
+            jsonOut(['ok' => false, 'error' => 'This Hostinger mailbox is already assigned to a client.'], 409);
+        }
+        $emailAddress = (string)($providerMailbox['address'] ?? '');
+        $now = date('c');
+        $assignment = MongoService::insert('client_mailboxes', [
+            'id' => 'mail_assignment_' . bin2hex(random_bytes(8)),
+            'clientId' => $clientId,
+            'providerMailboxId' => $providerMailboxId,
+            'emailAddress' => $emailAddress,
+            'displayName' => trim((string)($body['displayName'] ?? '')) ?: $emailAddress,
+            'enabled' => ($body['enabled'] ?? true) === true,
+            'createdAt' => $now,
+            'updatedAt' => $now,
+        ]);
+        jsonOut([
+            'ok' => true,
+            'mailbox' => hostingerMailAssignmentResponse($assignment, $client),
+        ], 201);
+    }
+
+    if ($assignmentId !== null && $method === 'PATCH') {
+        $assignment = MongoService::findOne('client_mailboxes', [
+            'id' => $assignmentId,
+            'clientId' => $clientId,
+        ]);
+        if ($assignment === null) {
+            jsonOut(['ok' => false, 'error' => 'Mailbox assignment not found.'], 404);
+        }
+        $updates = [];
+        if (array_key_exists('displayName', $body)) {
+            $displayName = trim((string)$body['displayName']);
+            if ($displayName === '' || strlen($displayName) > 191) {
+                jsonOut(['ok' => false, 'error' => 'Display name must be between 1 and 191 characters.'], 422);
+            }
+            $updates['displayName'] = $displayName;
+        }
+        if (array_key_exists('enabled', $body)) {
+            if (!is_bool($body['enabled'])) {
+                jsonOut(['ok' => false, 'error' => 'Portal access must be true or false.'], 422);
+            }
+            $updates['enabled'] = $body['enabled'];
+        }
+        if (!$updates) {
+            jsonOut(['ok' => false, 'error' => 'No supported mailbox assignment changes were provided.'], 422);
+        }
+        $updates['updatedAt'] = date('c');
+        MongoService::updateOne('client_mailboxes', [
+            'id' => $assignmentId,
+            'clientId' => $clientId,
+        ], $updates);
+        $updated = MongoService::findOne('client_mailboxes', ['id' => $assignmentId]);
+        jsonOut([
+            'ok' => true,
+            'mailbox' => hostingerMailAssignmentResponse($updated ?: $assignment, $client),
+        ]);
+    }
+
+    if ($assignmentId !== null && $method === 'DELETE') {
+        $deleted = MongoService::deleteOne('client_mailboxes', [
+            'id' => $assignmentId,
+            'clientId' => $clientId,
+        ]);
+        if ($deleted === 0) {
+            jsonOut(['ok' => false, 'error' => 'Mailbox assignment not found.'], 404);
+        }
+        jsonOut(['ok' => true, 'removed' => 1]);
+    }
+}
+
+if (preg_match('#^/admin/client-mailboxes/([^/]+)/reassign$#', $path, $matches) && $method === 'POST') {
+    $assignmentId = rawurldecode($matches[1]);
+    $targetClientId = trim((string)($body['targetClientId'] ?? ''));
+    if ($targetClientId === '' || ($body['confirmed'] ?? false) !== true) {
+        jsonOut(['ok' => false, 'error' => 'Choose a target client and confirm the transfer.'], 422);
+    }
+    $target = MongoService::findOne('clients', ['id' => $targetClientId]);
+    if ($target === null || !hostingerMailClientIsActive($target)) {
+        jsonOut(['ok' => false, 'error' => 'Target client not found.'], 404);
+    }
+    $assignment = MongoService::findOne('client_mailboxes', ['id' => $assignmentId]);
+    if ($assignment === null) {
+        jsonOut(['ok' => false, 'error' => 'Mailbox assignment not found.'], 404);
+    }
+    if (MongoService::updateOne('client_mailboxes', ['id' => $assignmentId], [
+        'clientId' => $targetClientId,
+        'displayName' => trim((string)($body['displayName'] ?? $assignment['displayName'] ?? $assignment['emailAddress'] ?? '')),
+        'updatedAt' => date('c'),
+    ]) === 0) {
+        jsonOut(['ok' => false, 'error' => 'Mailbox assignment could not be transferred.'], 409);
+    }
+    $updated = MongoService::findOne('client_mailboxes', ['id' => $assignmentId]);
+    jsonOut([
+        'ok' => true,
+        'mailbox' => hostingerMailAssignmentResponse($updated ?: $assignment, $target),
+    ]);
 }
 
 if ($path === '/admin/clients' && $method === 'POST') {
@@ -654,22 +836,136 @@ if ($path === '/admin/integrations/hostinger-mail' && $method === 'DELETE') {
     jsonOut(['ok' => true, 'connected' => false]);
 }
 
-if ($path === '/admin/hostinger/mailboxes' || $path === '/portal/mailboxes') {
+if ($path === '/admin/hostinger/mailboxes' && $method === 'GET') {
+    $integration = hostingerMailIntegration();
+    $providerMailboxes = hostingerMailMailboxList($integration);
+    $assignments = MongoService::getCollection('client_mailboxes', [], 1000);
+    $clients = MongoService::getCollection('clients', [], 1000);
+    $clientsById = [];
+    foreach ($clients as $client) {
+        if (hostingerMailClientIsActive($client)) {
+            $clientsById[(string)($client['id'] ?? '')] = $client;
+        }
+    }
+    $mailboxes = [];
+    foreach ($providerMailboxes as $providerMailbox) {
+        $resourceId = (string)($providerMailbox['resourceId'] ?? '');
+        $mailbox = [
+            'id' => $resourceId,
+            'resourceId' => $resourceId,
+            'email' => (string)($providerMailbox['address'] ?? ''),
+            'address' => (string)($providerMailbox['address'] ?? ''),
+            'name' => (string)($providerMailbox['address'] ?? ''),
+            'status' => 'Active',
+            'inHostinger' => true,
+        ];
+        foreach ($assignments as $assignment) {
+            if ((string)($assignment['providerMailboxId'] ?? '') !== $resourceId) continue;
+            $client = $clientsById[(string)($assignment['clientId'] ?? '')] ?? null;
+            $mailbox['assignedClientId'] = (string)($assignment['clientId'] ?? '');
+            $mailbox['assignment'] = hostingerMailAssignmentResponse($assignment, $client);
+            break;
+        }
+        $mailboxes[] = $mailbox;
+    }
+    jsonOut(['ok' => true, 'mailboxes' => $mailboxes]);
+}
+
+if (preg_match('#^/admin/hostinger/mailboxes/([^/]+)/stats$#', $path, $matches) && $method === 'GET') {
+    $integration = hostingerMailIntegration();
+    $token = trim((string)($integration['token'] ?? ''));
+    if ($token === '') {
+        jsonOut(['ok' => false, 'error' => 'Hostinger Mail API is not configured. Save a valid token first.'], 503);
+    }
+    $resourceId = rawurlencode(rawurldecode($matches[1]));
+    $foldersResponse = hostingerMailApiRequest($token, '/api/v1/mailboxes/' . $resourceId . '/folders');
+    $quotaResponse = hostingerMailApiRequest($token, '/api/v1/mailboxes/' . $resourceId . '/quota');
+    $folders = hostingerMailApiData($foldersResponse);
+    if (isset($folders['folders']) && is_array($folders['folders'])) {
+        $folders = $folders['folders'];
+    }
+    if ($folders && array_keys($folders) !== range(0, count($folders) - 1)) {
+        jsonOut(['ok' => false, 'error' => 'Hostinger Mail API returned an unreadable folder list.'], 502);
+    }
+    $folderStats = [];
+    foreach ($folders as $folder) {
+        if (!is_array($folder)) continue;
+        $specialUse = strtolower(ltrim((string)($folder['specialUse'] ?? ''), '\\'));
+        if ($specialUse === '') {
+            $name = strtolower((string)($folder['name'] ?? $folder['path'] ?? ''));
+            $specialUse = match ($name) {
+                'inbox' => 'inbox',
+                'sent', 'sent items' => 'sent',
+                'junk', 'spam' => 'junk',
+                'trash', 'deleted items' => 'trash',
+                default => '',
+            };
+        }
+        if ($specialUse !== '' && in_array($specialUse, ['inbox', 'sent', 'junk', 'trash'], true)) {
+            $folderStats[$specialUse] = [
+                'path' => (string)($folder['path'] ?? ''),
+                'messageCount' => (int)($folder['messageCount'] ?? 0),
+                'unreadCount' => (int)($folder['unreadCount'] ?? 0),
+            ];
+        }
+    }
     jsonOut([
         'ok' => true,
-        'mailboxes' => [
-            ['id' => 'mb_1', 'email' => 'support@codexdynamics.com', 'name' => 'Primary Support', 'status' => 'Active'],
-            ['id' => 'mb_2', 'email' => 'billing@codexdynamics.com', 'name' => 'Billing Desk', 'status' => 'Active'],
+        'stats' => [
+            'folders' => $folderStats,
+            'quota' => hostingerMailApiData($quotaResponse),
         ],
     ]);
 }
 
-if ($path === '/admin/hostinger/overview') {
+if ($path === '/admin/hostinger/overview' && $method === 'GET') {
+    $integration = hostingerMailIntegration();
+    $providerMailboxes = hostingerMailMailboxList($integration);
+    $assignments = MongoService::getCollection('client_mailboxes', [], 1000);
+    $clients = MongoService::getCollection('clients', [], 1000);
+    $clientsById = [];
+    $activeClients = [];
+    foreach ($clients as $client) {
+        if (!hostingerMailClientIsActive($client)) continue;
+        $clientId = (string)($client['id'] ?? '');
+        $portalActive = (bool)($client['portalEnabled'] ?? $client['portal_enabled'] ?? false);
+        $clientsById[$clientId] = $client;
+        $activeClients[] = [
+            'id' => $clientId,
+            'name' => (string)($client['name'] ?? ''),
+            'email' => (string)($client['email'] ?? ''),
+            'company' => (string)($client['company'] ?? ''),
+            'portalActive' => $portalActive,
+        ];
+    }
+    $assignmentByMailbox = [];
+    foreach ($assignments as $assignment) {
+        $assignmentByMailbox[(string)($assignment['providerMailboxId'] ?? '')] = $assignment;
+    }
+    $mailboxes = [];
+    foreach ($providerMailboxes as $providerMailbox) {
+        $resourceId = (string)($providerMailbox['resourceId'] ?? '');
+        $address = (string)($providerMailbox['address'] ?? '');
+        $mailbox = [
+            'resourceId' => $resourceId,
+            'address' => $address,
+            'inHostinger' => true,
+            'activity' => ['lastOpenedAt' => null, 'sentLast30Days' => 0],
+        ];
+        if (isset($assignmentByMailbox[$resourceId])) {
+            $assignment = $assignmentByMailbox[$resourceId];
+            $client = $clientsById[(string)($assignment['clientId'] ?? '')] ?? null;
+            $mailbox['assignment'] = hostingerMailAssignmentResponse($assignment, $client);
+        }
+        $mailboxes[] = $mailbox;
+    }
     jsonOut([
         'ok' => true,
-        'quota' => ['used' => '1.2 GB', 'total' => '10 GB', 'percentage' => 12],
-        'mailboxesCount' => 2,
-        'domain' => 'codexdynamics.com',
+        'integration' => ['configured' => true, 'status' => $integration['status'] ?? 'connected'],
+        'mailboxes' => $mailboxes,
+        'clients' => $activeClients,
+        'quota' => ['supported' => false, 'totalUsage' => 0, 'totalLimit' => 0, 'totalPercentage' => 0],
+        'mailboxesCount' => count($providerMailboxes),
     ]);
 }
 
