@@ -220,7 +220,20 @@ if ($path === '/admin/login' && $method === 'POST') {
 }
 
 if ($path === '/admin/me') {
-    $staff = MongoService::findOne('staff_users', ['email' => 'admin@codexdynamics.com']);
+    $adminEmail = strtolower(trim((string)($config['admin_email'] ?? 'admin@codexdynamics.com')));
+    $staff = MongoService::findOne('staff_users', ['email' => $adminEmail]);
+    if (!$staff) {
+        $staff = [
+            'id' => 'staff_super_admin',
+            'email' => $adminEmail,
+            'name' => 'Codex Super Admin',
+            'role' => 'super-admin',
+            'officeId' => 'off_1',
+            'teamId' => 'team_1',
+            'status' => 'Active',
+            'capabilities' => '["all"]',
+        ];
+    }
     jsonOut(['ok' => true, 'user' => $staff]);
 }
 
@@ -284,6 +297,21 @@ if (str_starts_with($path, '/admin/clients/search')) {
 }
 
 if ($path === '/admin/clients' && $method === 'POST') {
+    $firstName = trim((string)($body['first_name'] ?? $body['firstName'] ?? ''));
+    $lastName = trim((string)($body['last_name'] ?? $body['lastName'] ?? ''));
+    $name = trim((string)($body['name'] ?? ''));
+    if ($name === '') {
+        $name = trim($firstName . ' ' . $lastName);
+    }
+    $email = strtolower(trim((string)($body['email'] ?? '')));
+    if ($name === '' || $email === '') {
+        jsonOut(['ok' => false, 'error' => 'Client name and email are required.'], 422);
+    }
+    $body['first_name'] = $firstName;
+    $body['last_name'] = $lastName;
+    $body['name'] = $name;
+    $body['email'] = $email;
+    $body['company'] = trim((string)($body['company'] ?? ''));
     $body['portalEnabled'] = true;
     $body['portal_enabled'] = 1;
     $body['status'] = $body['status'] ?? $body['stage'] ?? 'Active';
@@ -456,8 +484,23 @@ if (str_contains($path, '/impersonate') && $method === 'POST') {
     preg_match('#/clients/([^/]+)/impersonate#', $path, $m);
     $cid = $m[1] ?? '';
     $client = MongoService::findOne('clients', ['id' => $cid]);
+    if (!$client) {
+        jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+    }
+    $client['name'] = trim((string)($client['name'] ?? ''));
+    if ($client['name'] === '') {
+        $client['name'] = trim(
+            (string)($client['first_name'] ?? $client['firstName'] ?? '') . ' ' .
+            (string)($client['last_name'] ?? $client['lastName'] ?? '')
+        );
+    }
+    if ($client['name'] === '') {
+        $client['name'] = trim((string)($client['company'] ?? '')) ?: 'Client';
+    }
+    $client['company'] = (string)($client['company'] ?? '');
+    $client['email'] = (string)($client['email'] ?? '');
     $token = 'cdx_portal_impersonate_' . $cid . '_' . time();
-    jsonOut(['ok' => true, 'token' => $token, 'client' => $client ?: ['id' => $cid, 'portalEnabled' => true]]);
+    jsonOut(['ok' => true, 'token' => $token, 'client' => $client]);
 }
 
 if (str_contains($path, '/portal-password')) {

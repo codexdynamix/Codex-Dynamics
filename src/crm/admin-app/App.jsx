@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Routes,
   Route,
@@ -460,8 +460,10 @@ function App() {
   const [notification, setNotification] = useState('');
   const [appLoaded, setAppLoaded] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
+  const lastClientCreateAt = useRef(0);
 
   const loadBackendAdminData = useCallback(async () => {
+    const clientsRequestStartedAt = Date.now();
     try {
       const storedProfile = getStoredAdminProfile();
       const isSuperAdmin = storedProfile?.role === ROLE.SUPER_ADMIN;
@@ -508,9 +510,11 @@ function App() {
           mergedUsers = [...mergedUsers, sessionAdmin];
         }
 
-        const normalizedClients = (liveResult.clients || []).map((client) =>
-          normalizeClientAssignment(client, mergedUsers, teams)
-        );
+        const normalizedClients = clientsRequestStartedAt < lastClientCreateAt.current
+          ? prev.clients
+          : (liveResult.clients || []).map((client) =>
+              normalizeClientAssignment(client, mergedUsers, teams)
+            );
 
         const deletedClients = (deletedResult.clients || []).map((client) =>
           normalizeClientAssignment(client, mergedUsers, teams)
@@ -563,8 +567,10 @@ function App() {
     // local selectors in sync too, including clients created by another user.
     const clientRefreshId = setInterval(async () => {
       if (!getAdminToken()) return;
+      const refreshStartedAt = Date.now();
       try {
         const liveResult = await fetchAllClients();
+        if (refreshStartedAt < lastClientCreateAt.current) return;
         setData((prev) => {
           const storedProfile = getStoredAdminProfile();
           const sessionAdmin = storedProfile
@@ -1049,9 +1055,13 @@ function App() {
         showNotification('Client creation returned no row.');
         return null;
       }
+      lastClientCreateAt.current = Date.now();
       setData((prev) => {
         const normalized = normalizeClientAssignment(serverClient, prev.users, prev.teams);
-        return { ...prev, clients: [normalized, ...prev.clients] };
+        return {
+          ...prev,
+          clients: [normalized, ...prev.clients.filter((client) => client.id !== normalized.id)],
+        };
       });
       const display = serverClient.name || `${serverClient.firstName || ''} ${serverClient.lastName || ''}`.trim();
       showNotification(`Client "${display || serverClient.id}" created.`);

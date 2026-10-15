@@ -64,6 +64,12 @@ export function PortalShell({ currentPath, onNavigate, children }: PortalShellPr
     return null;
   }
 
+  const clientName = String(
+    client.name
+    || client.company
+    || 'Client'
+  );
+
   const navItems = [
     { path: '/portal/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/portal/websites', label: 'Websites & Back Offices', icon: Globe },
@@ -268,14 +274,14 @@ export function PortalShell({ currentPath, onNavigate, children }: PortalShellPr
               className="flex items-center gap-2 cursor-pointer pl-1.5 sm:pl-2.5 sm:border-l border-black/[0.06] dark:border-white/[0.08] group"
             >
               <div className="size-8 rounded-full bg-[#0071E3] text-white flex items-center justify-center font-bold text-xs ring-1 ring-white/20">
-                {client.name.charAt(0)}
+                {clientName.charAt(0).toUpperCase()}
               </div>
               <div className="hidden md:block text-left">
                 <div className="text-xs font-semibold text-[#1D1D1F] dark:text-white group-hover:text-[#0071E3] transition-colors leading-tight">
-                  {client.name}
+                  {clientName}
                 </div>
                 <div className="text-[10px] text-[#86868B] truncate max-w-[120px]">
-                  {client.company}
+                  {client.company || ''}
                 </div>
               </div>
             </div>

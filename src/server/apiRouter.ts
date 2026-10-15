@@ -413,11 +413,16 @@ apiRouter.post('/admin/clients', async (req: Request, res: Response) => {
   const payload = req.body || {};
   const first = payload.firstName || payload.first_name || '';
   const last = payload.lastName || payload.last_name || '';
-  const fullName = payload.name || `${first} ${last}`.trim() || 'New Client';
+  const fullName = String(payload.name || `${first} ${last}`).trim();
+  const email = String(payload.email || '').trim().toLowerCase();
+  if (!fullName || !email) {
+    return res.status(422).json({ ok: false, error: 'Client name and email are required.' });
+  }
   const newClient = {
     ...payload,
     id: payload.id || `client_${Date.now()}`,
     name: fullName,
+    email,
     firstName: first,
     lastName: last,
     status: payload.status || payload.stage || 'Active',
@@ -473,8 +478,19 @@ apiRouter.post('/admin/clients/:id/restore', async (req: Request, res: Response)
 });
 
 apiRouter.post('/admin/clients/:id/impersonate', async (req: Request, res: Response) => {
-  const client = await getMongoCollection('clients').findOne({ id: req.params.id });
-  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  const storedClient = await getMongoCollection('clients').findOne({ id: req.params.id });
+  if (!storedClient) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  const client = {
+    ...storedClient,
+    name: String(
+      storedClient.name
+      || `${storedClient.first_name || storedClient.firstName || ''} ${storedClient.last_name || storedClient.lastName || ''}`.trim()
+      || storedClient.company
+      || 'Client'
+    ),
+    company: storedClient.company || '',
+    email: storedClient.email || '',
+  };
   const token = `cdx_portal_impersonate_${client.id}_${Date.now()}`;
   res.json({
     ok: true,
