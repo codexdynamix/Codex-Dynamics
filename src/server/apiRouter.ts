@@ -807,22 +807,117 @@ apiRouter.all('/admin/password-reset-requests', async (_req: Request, res: Respo
 // ---------------------------------------------------------------------------
 // 8. HOSTINGER MAIL INTEGRATION & MAILBOXES
 // ---------------------------------------------------------------------------
-apiRouter.all('/api/admin/integrations/hostinger-mail', async (req: Request, res: Response) => {
+async function verifyHostingerMailToken(token: string): Promise<{ mailboxes: any[] }> {
+  const response = await fetch('https://api.mail.hostinger.com/api/v1/me', {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    signal: AbortSignal.timeout(15000),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = response.status === 401 || response.status === 403
+      ? 'Hostinger rejected the API token. Confirm it is a Hostinger Mail API token with mailbox access.'
+      : payload?.error || payload?.message || `Hostinger Mail API returned HTTP ${response.status}.`;
+    throw Object.assign(new Error(message), { status: 502 });
+  }
+  if (!payload || typeof payload !== 'object') {
+    throw Object.assign(new Error('Hostinger Mail API returned an unreadable response.'), { status: 502 });
+  }
+  const account = payload.data?.data || payload.data || payload;
+  return { mailboxes: Array.isArray(account.mailboxes) ? account.mailboxes : [] };
+}
+
+apiRouter.all('/admin/integrations/hostinger-mail', async (req: Request, res: Response) => {
   const col = getMongoCollection('hostinger_mail_integrations');
   if (req.method === 'POST') {
-    await col.updateOne({}, { $set: { token: req.body.token, connected: true, updated_at: new Date().toISOString() } }, { upsert: true });
-    return res.json({ ok: true, connected: true });
+    const token = String(req.body?.token || '').trim();
+    if (!token) return res.status(422).json({ ok: false, error: 'Enter a Hostinger Mail API token before saving.' });
+    try {
+      const { mailboxes } = await verifyHostingerMailToken(token);
+      const now = new Date().toISOString();
+      await col.updateOne({}, {
+        $set: {
+          token,
+          status: 'connected',
+          mailboxes,
+          last_tested_at: now,
+          last_success_at: now,
+        },
+      }, { upsert: true });
+      return res.json({
+        ok: true,
+        connected: true,
+        integration: {
+          configured: true,
+          status: 'connected',
+          maskedToken: `••••••••${token.slice(-4)}`,
+          mailboxCount: mailboxes.length,
+          lastTestedAt: now,
+          lastSuccessAt: now,
+        },
+      });
+    } catch (error: any) {
+      return res.status(error.status || 502).json({ ok: false, error: error.message || 'Hostinger Mail token validation failed.' });
+    }
   }
   if (req.method === 'DELETE') {
     await col.deleteOne({});
     return res.json({ ok: true, connected: false });
   }
   const int = await col.findOne({});
-  res.json({ ok: true, connected: !!int?.connected, token: int?.token || '' });
+  const configured = Boolean(int?.token);
+  res.json({
+    ok: true,
+    integration: {
+      configured,
+      status: int?.status || (configured ? 'connection_error' : 'not_configured'),
+      maskedToken: configured ? `••••••••${String(int.token).slice(-4)}` : '',
+      mailboxCount: Array.isArray(int?.mailboxes) ? int.mailboxes.length : 0,
+      lastTestedAt: int?.last_tested_at || null,
+      lastSuccessAt: int?.last_success_at || null,
+    },
+  });
 });
 
-apiRouter.post('/admin/integrations/hostinger-mail/test', (_req: Request, res: Response) => {
-  res.json({ ok: true, message: 'Hostinger Mail SMTP/IMAP handshake verified.' });
+apiRouter.post('/admin/integrations/hostinger-mail/test', async (req: Request, res: Response) => {
+  const integration = await getMongoCollection('hostinger_mail_integrations').findOne({});
+  const token = String(req.body?.token || integration?.token || '').trim();
+  if (!token) return res.status(422).json({ ok: false, error: 'Enter a Hostinger Mail API token or save one first.' });
+  const testedStoredToken = Boolean(integration?.token && integration.token === token);
+  try {
+    const { mailboxes } = await verifyHostingerMailToken(token);
+    const now = new Date().toISOString();
+    if (testedStoredToken) {
+      await getMongoCollection('hostinger_mail_integrations').updateOne({}, {
+        $set: {
+          status: 'connected',
+          mailboxes,
+          last_tested_at: now,
+          last_success_at: now,
+        },
+      });
+    }
+    return res.json({
+      ok: true,
+      message: 'Hostinger Mail API connection verified.',
+      integration: {
+        configured: Boolean(integration?.token),
+        status: testedStoredToken ? 'connected' : (integration?.status || 'connection_error'),
+        mailboxCount: mailboxes.length,
+        lastTestedAt: now,
+        lastSuccessAt: now,
+      },
+    });
+  } catch (error: any) {
+    if (testedStoredToken && integration) {
+      await getMongoCollection('hostinger_mail_integrations').updateOne({}, {
+        $set: { status: 'connection_error', last_tested_at: new Date().toISOString() },
+      });
+    }
+    return res.status(error.status || 502).json({ ok: false, error: error.message || 'Hostinger Mail connection test failed.' });
+  }
 });
 
 apiRouter.get('/admin/hostinger/mailboxes', async (_req: Request, res: Response) => {

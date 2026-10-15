@@ -148,6 +148,38 @@ class MongoService {
 
 MongoService::init($mongoUri, $mongoDbName);
 
+function hostingerMailApiRequest(string $token): array {
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "Accept: application/json\r\nAuthorization: Bearer {$token}\r\n",
+            'timeout' => 15,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $responseBody = file_get_contents('https://api.mail.hostinger.com/api/v1/me', false, $context);
+    $statusLine = $http_response_header[0] ?? '';
+    preg_match('/\s(\d{3})\s/', $statusLine, $statusMatch);
+    $status = (int)($statusMatch[1] ?? 0);
+    if ($responseBody === false || $status === 0) {
+        jsonOut(['ok' => false, 'error' => 'Could not reach the Hostinger Mail API. Check server outbound HTTPS connectivity and try again.'], 502);
+    }
+    $decoded = json_decode($responseBody, true);
+    if ($status < 200 || $status >= 300) {
+        $message = is_array($decoded) ? ($decoded['error'] ?? $decoded['message'] ?? '') : '';
+        if ($status === 401 || $status === 403) {
+            $message = 'Hostinger rejected the API token. Confirm it is a Hostinger Mail API token with mailbox access.';
+        } elseif ($message === '') {
+            $message = "Hostinger Mail API returned HTTP {$status}.";
+        }
+        jsonOut(['ok' => false, 'error' => $message], 502);
+    }
+    if (!is_array($decoded)) {
+        jsonOut(['ok' => false, 'error' => 'Hostinger Mail API returned an unreadable response.'], 502);
+    }
+    return $decoded;
+}
+
 // ---------------------------------------------------------------------------
 // 3. Routing
 // ---------------------------------------------------------------------------
@@ -533,6 +565,95 @@ if ($path === '/admin/accounting/overview' || str_starts_with($path, '/admin/acc
 }
 
 // 7. Hostinger Mail & Mailboxes
+if ($path === '/admin/integrations/hostinger-mail' && $method === 'GET') {
+    $integration = MongoService::findOne('hostinger_mail_integrations', []) ?: [];
+    $token = (string)($integration['token'] ?? '');
+    $mailboxes = $integration['mailboxes'] ?? [];
+    jsonOut([
+        'ok' => true,
+        'integration' => [
+            'configured' => $token !== '',
+            'status' => $integration['status'] ?? ($token !== '' ? 'connection_error' : 'not_configured'),
+            'maskedToken' => $token !== '' ? '••••••••' . substr($token, -4) : '',
+            'mailboxCount' => count($mailboxes),
+            'lastTestedAt' => $integration['last_tested_at'] ?? null,
+            'lastSuccessAt' => $integration['last_success_at'] ?? null,
+        ],
+    ]);
+}
+
+if ($path === '/admin/integrations/hostinger-mail/test' && $method === 'POST') {
+    $integration = MongoService::findOne('hostinger_mail_integrations', []) ?: [];
+    $token = trim((string)($body['token'] ?? $integration['token'] ?? ''));
+    if ($token === '') {
+        jsonOut(['ok' => false, 'error' => 'Enter a Hostinger Mail API token or save one first.'], 422);
+    }
+    $account = hostingerMailApiRequest($token);
+    $payload = $account['data'] ?? $account;
+    $mailboxes = is_array($payload['mailboxes'] ?? null) ? $payload['mailboxes'] : [];
+    $now = date('c');
+    if (isset($integration['_id'])) unset($integration['_id']);
+    $testedStoredToken = isset($integration['token']) && hash_equals((string)$integration['token'], $token);
+    if ($testedStoredToken) {
+        $integration['status'] = 'connected';
+        $integration['mailboxes'] = $mailboxes;
+        $integration['last_tested_at'] = $now;
+        $integration['last_success_at'] = $now;
+        MongoService::updateOne('hostinger_mail_integrations', [], $integration);
+    }
+    jsonOut([
+        'ok' => true,
+        'message' => 'Hostinger Mail API connection verified.',
+        'integration' => [
+            'configured' => isset($integration['token']) && $integration['token'] !== '',
+            'status' => $testedStoredToken ? 'connected' : ($integration['status'] ?? 'connection_error'),
+            'mailboxCount' => count($mailboxes),
+            'lastTestedAt' => $now,
+            'lastSuccessAt' => $now,
+        ],
+    ]);
+}
+
+if ($path === '/admin/integrations/hostinger-mail' && $method === 'POST') {
+    $token = trim((string)($body['token'] ?? ''));
+    if ($token === '') {
+        jsonOut(['ok' => false, 'error' => 'Enter a Hostinger Mail API token before saving.'], 422);
+    }
+    $account = hostingerMailApiRequest($token);
+    $payload = $account['data'] ?? $account;
+    $mailboxes = is_array($payload['mailboxes'] ?? null) ? $payload['mailboxes'] : [];
+    $now = date('c');
+    $integration = MongoService::findOne('hostinger_mail_integrations', []) ?: [];
+    if (isset($integration['_id'])) unset($integration['_id']);
+    $integration['token'] = $token;
+    $integration['status'] = 'connected';
+    $integration['mailboxes'] = $mailboxes;
+    $integration['last_tested_at'] = $now;
+    $integration['last_success_at'] = $now;
+    if (MongoService::findOne('hostinger_mail_integrations', []) !== null) {
+        MongoService::updateOne('hostinger_mail_integrations', [], $integration);
+    } else {
+        MongoService::insert('hostinger_mail_integrations', $integration);
+    }
+    jsonOut([
+        'ok' => true,
+        'connected' => true,
+        'integration' => [
+            'configured' => true,
+            'status' => 'connected',
+            'maskedToken' => '••••••••' . substr($token, -4),
+            'mailboxCount' => count($mailboxes),
+            'lastTestedAt' => $now,
+            'lastSuccessAt' => $now,
+        ],
+    ]);
+}
+
+if ($path === '/admin/integrations/hostinger-mail' && $method === 'DELETE') {
+    MongoService::deleteOne('hostinger_mail_integrations', []);
+    jsonOut(['ok' => true, 'connected' => false]);
+}
+
 if ($path === '/admin/hostinger/mailboxes' || $path === '/portal/mailboxes') {
     jsonOut([
         'ok' => true,
