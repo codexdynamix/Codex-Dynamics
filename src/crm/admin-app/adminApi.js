@@ -607,23 +607,19 @@ export async function markAdminNotificationRead(id) {
   return adminFetch(`/api/admin/notifications/${encodeURIComponent(id)}/read`, { method: 'POST', body: {} });
 }
 
-/** Load all clients by paging through the API (no 500-row cap). */
+/** Load clients in bounded pages so large workspaces avoid oversized responses. */
 export async function fetchAllClients(options = {}) {
-  // The backend allows up to 10,000 rows. Fetching the current silo in one
-  // request keeps local selectors and tables complete after new uploads.
-  const pageSize = 10000;
-  let offset = 0;
+  const pageSize = 500;
+  let offset = Math.max(Number(options.offset) || 0, 0);
   const all = [];
-  let total = 0;
   for (let page = 0; page < 200; page += 1) {
     const result = await listClients({ ...options, limit: pageSize, offset });
     const batch = result.clients || [];
     all.push(...batch);
-    total = result.total ?? all.length;
     if (!result.hasMore || batch.length === 0) break;
-    offset += pageSize;
+    offset += batch.length;
   }
-  return { clients: all, total };
+  return { clients: all, total: all.length };
 }
 
 /**
@@ -1172,7 +1168,7 @@ export async function listClients({
     total:   res.total ?? 0,
     limit:   res.limit ?? limit,
     offset:  res.offset ?? offset,
-    hasMore: !!res.has_more,
+    hasMore: Boolean(res.hasMore ?? res.has_more),
   };
 }
 

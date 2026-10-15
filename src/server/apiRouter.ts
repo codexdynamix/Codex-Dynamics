@@ -378,11 +378,27 @@ function clientDeletionFilter(includeDeleted: unknown): Record<string, unknown> 
   return { $nor: [{ is_bin: true }, { deleted_at: { $ne: null } }] };
 }
 
-apiRouter.get('/admin/clients', async (_req: Request, res: Response) => {
-  const clients = await getMongoCollection('clients').find(
-    clientDeletionFilter(_req.query.include_deleted)
-  );
-  res.json({ ok: true, clients, total: clients.length, hasMore: false });
+apiRouter.get('/admin/clients', async (req: Request, res: Response) => {
+  const collection = getMongoCollection('clients');
+  const filter = clientDeletionFilter(req.query.include_deleted);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const clients = await collection.find(filter, {
+    sort: { _id: -1 },
+    limit: limit + 1,
+    skip: offset,
+  });
+  const hasMore = clients.length > limit;
+  if (hasMore) clients.pop();
+  res.json({
+    ok: true,
+    clients,
+    total: hasMore ? null : offset + clients.length,
+    limit,
+    offset,
+    hasMore,
+    has_more: hasMore,
+  });
 });
 
 apiRouter.get('/admin/clients/search', async (req: Request, res: Response) => {

@@ -88,9 +88,11 @@ class MongoService {
         return self::$databaseName;
     }
 
-    public static function getCollection(string $name, array $filter = [], int $limit = 200, int $skip = 0): array {
+    public static function getCollection(string $name, array $filter = [], int $limit = 200, int $skip = 0, array $sort = []): array {
         $col = self::$client->selectDatabase(self::$databaseName)->selectCollection($name);
-        $cursor = $col->find($filter, ['limit' => $limit, 'skip' => $skip]);
+        $options = ['limit' => $limit, 'skip' => $skip];
+        if ($sort) $options['sort'] = $sort;
+        $cursor = $col->find($filter, $options);
         $results = [];
         foreach ($cursor as $doc) {
             $arr = (array)$doc;
@@ -261,17 +263,19 @@ if ($path === '/admin/clients' && $method === 'GET') {
             ]],
         ]];
     }
-    $limit = min(max((int)($_GET['limit'] ?? 500), 1), 10000);
+    $limit = min(max((int)($_GET['limit'] ?? 500), 1), 1000);
     $offset = max((int)($_GET['offset'] ?? 0), 0);
-    $total = MongoService::countDocuments('clients', $filter);
-    $clients = MongoService::getCollection('clients', $filter, $limit, $offset);
+    $clients = MongoService::getCollection('clients', $filter, $limit + 1, $offset, ['_id' => -1]);
+    $hasMore = count($clients) > $limit;
+    if ($hasMore) array_pop($clients);
     jsonOut([
         'ok' => true,
         'clients' => $clients,
-        'total' => $total,
+        'total' => $hasMore ? null : $offset + count($clients),
         'limit' => $limit,
         'offset' => $offset,
-        'hasMore' => $offset + count($clients) < $total,
+        'hasMore' => $hasMore,
+        'has_more' => $hasMore,
     ]);
 }
 

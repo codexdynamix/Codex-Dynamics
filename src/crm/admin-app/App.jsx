@@ -28,6 +28,7 @@ import {
   unblockStaffApi,
   listOffices,
   listTeams,
+  listClients,
   fetchAllClients,
   fetchClientById,
   listStaff,
@@ -461,6 +462,8 @@ function App() {
   const [appLoaded, setAppLoaded] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
   const lastClientCreateAt = useRef(0);
+  const clientHydrationInProgress = useRef(false);
+  const firstPageClientIds = useRef(new Set());
 
   const loadBackendAdminData = useCallback(async () => {
     const clientsRequestStartedAt = Date.now();
@@ -470,8 +473,8 @@ function App() {
       const [offices, teams, liveResult, deletedResult, staffRows, deletedOffices, deletedTeams, deletedStaff] = await Promise.all([
         listOffices(),
         listTeams(),
-        fetchAllClients(),
-        isSuperAdmin ? fetchAllClients({ includeDeleted: 'only' }) : Promise.resolve({ clients: [] }),
+        listClients({ limit: 500, offset: 0 }),
+        isSuperAdmin ? listClients({ includeDeleted: 'only', limit: 500, offset: 0 }) : Promise.resolve({ clients: [] }),
         listStaff(),
         isSuperAdmin ? listOffices({ includeDeleted: 'only' }) : Promise.resolve([]),
         isSuperAdmin ? listTeams({ includeDeleted: 'only' }) : Promise.resolve([]),
@@ -499,6 +502,9 @@ function App() {
         })),
       ];
 
+      if (clientsRequestStartedAt >= lastClientCreateAt.current) {
+        firstPageClientIds.current = new Set((liveResult.clients || []).map((client) => client.id));
+      }
       setData((prev) => {
         const storedProfile = getStoredAdminProfile();
         const sessionAdmin = storedProfile
@@ -515,7 +521,6 @@ function App() {
           : (liveResult.clients || []).map((client) =>
               normalizeClientAssignment(client, mergedUsers, teams)
             );
-
         const deletedClients = (deletedResult.clients || []).map((client) =>
           normalizeClientAssignment(client, mergedUsers, teams)
         );
@@ -530,6 +535,51 @@ function App() {
           users: mergedUsers,
         };
       });
+
+      if (liveResult.hasMore && !clientHydrationInProgress.current) {
+        clientHydrationInProgress.current = true;
+        void fetchAllClients({ offset: liveResult.clients.length })
+          .then(({ clients: remainingClients }) => {
+            const completeClientList = [...(liveResult.clients || []), ...remainingClients];
+            firstPageClientIds.current = new Set(completeClientList.slice(0, 500).map((client) => client.id));
+            setData((prev) => {
+              const loaded = completeClientList.map((client) =>
+                normalizeClientAssignment(client, prev.users, prev.teams)
+              );
+              const loadedIds = new Set(loaded.map((client) => client.id));
+              const newlyCreated = prev.clients.filter((client) =>
+                !loadedIds.has(client.id) && lastClientCreateAt.current > clientsRequestStartedAt
+              );
+              return {
+                ...prev,
+                clients: [...loaded, ...newlyCreated],
+              };
+            });
+          })
+          .catch((error) => {
+            console.warn('[App] background client hydration failed', error);
+          })
+          .finally(() => {
+            clientHydrationInProgress.current = false;
+          });
+      }
+
+      if (isSuperAdmin && deletedResult.hasMore) {
+        void fetchAllClients({
+          includeDeleted: 'only',
+          offset: deletedResult.clients.length,
+        }).then(({ clients: remainingDeletedClients }) => {
+          setData((prev) => ({
+            ...prev,
+            deletedClients: [
+              ...(deletedResult.clients || []),
+              ...remainingDeletedClients,
+            ].map((client) => normalizeClientAssignment(client, prev.users, prev.teams)),
+          }));
+        }).catch((error) => {
+          console.warn('[App] background recycle-bin hydration failed', error);
+        });
+      }
     } catch (error) {
       console.error('[App] failed to load admin backend data', error);
     } finally {
@@ -569,28 +619,26 @@ function App() {
       if (!getAdminToken()) return;
       const refreshStartedAt = Date.now();
       try {
-        const liveResult = await fetchAllClients();
+        const liveResult = await listClients({ limit: 500, offset: 0 });
         if (refreshStartedAt < lastClientCreateAt.current) return;
+        const previouslyLoadedFirstPage = firstPageClientIds.current;
+        firstPageClientIds.current = new Set((liveResult.clients || []).map((client) => client.id));
         setData((prev) => {
-          const storedProfile = getStoredAdminProfile();
-          const sessionAdmin = storedProfile
-            ? prev.users.find((u) => u.id === storedProfile.id)
-            : null;
           const normalizedClients = (liveResult.clients || []).map((client) =>
             normalizeClientAssignment(client, prev.users, prev.teams)
           );
+          const retainedClients = prev.clients.filter((client) =>
+            !previouslyLoadedFirstPage.has(client.id)
+          );
           return {
             ...prev,
-            clients: normalizedClients,
-            users: sessionAdmin && !prev.users.some((u) => u.id === sessionAdmin.id)
-              ? [...prev.users, sessionAdmin]
-              : prev.users,
+            clients: [...normalizedClients, ...retainedClients],
           };
         });
       } catch (error) {
         console.warn('[App] background client refresh failed', error);
       }
-    }, 15000);
+    }, 60000);
 
     const refreshStaffPresence = () => {
       if (!getAdminToken()) return;
