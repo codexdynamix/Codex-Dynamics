@@ -4,6 +4,6 @@
   "type": "project",
   "require": {
     "php": ">=8.0",
-    "mongodb/mongodb": "^1.15"
+    "mongodb/mongodb": "^2.0"
   }
 }
