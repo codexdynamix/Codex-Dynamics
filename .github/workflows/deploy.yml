@@ -26,12 +26,24 @@ jobs:
           cache: npm
 
       - name: Install MongoDB PHP library
-        run: composer update --no-dev --prefer-dist --working-dir=public/api
+        run: composer update --no-dev --prefer-dist --optimize-autoloader --working-dir=public/api
+
+      - name: Verify PHP dependencies
+        run: |
+          test -f public/api/vendor/autoload.php
+          php -r 'require "public/api/vendor/autoload.php"; if (!class_exists("MongoDB\\Client")) { exit(1); }'
 
       - name: Build website
         run: |
           npm ci
           npm run build
+
+      - name: Add PHP API to deployment artifact
+        run: |
+          mkdir -p dist/api
+          cp -R public/api/. dist/api/
+          test -f dist/api/vendor/autoload.php
+          php -l dist/api/index.php
 
       - name: Deploy website to Hostinger
         uses: SamKirkland/FTP-Deploy-Action@v4.4.0
