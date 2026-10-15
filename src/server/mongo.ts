@@ -22,257 +22,102 @@ export interface MongoCollection<T = any> {
   countDocuments(filter?: any): Promise<number>;
 }
 
-class InMemoryCollection<T = any> implements MongoCollection<T> {
-  private docs: any[] = [];
-
-  constructor(initialDocs: any[] = []) {
-    this.docs = JSON.parse(JSON.stringify(initialDocs));
-  }
-
-  private matchesFilter(doc: any, filter?: any): boolean {
-    if (!filter || Object.keys(filter).length === 0) return true;
-    for (const [key, value] of Object.entries(filter)) {
-      if (key === '$or' && Array.isArray(value)) {
-        if (!value.some((subFilter) => this.matchesFilter(doc, subFilter))) return false;
-        continue;
-      }
-      if (key === '$and' && Array.isArray(value)) {
-        if (!value.every((subFilter) => this.matchesFilter(doc, subFilter))) return false;
-        continue;
-      }
-      const docVal = doc[key];
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        const valObj = value as Record<string, any>;
-        if ('$ne' in valObj && docVal === valObj.$ne) return false;
-        if ('$in' in valObj && Array.isArray(valObj.$in) && !valObj.$in.includes(docVal)) return false;
-        if ('$nin' in valObj && Array.isArray(valObj.$nin) && valObj.$nin.includes(docVal)) return false;
-        if ('$regex' in valObj) {
-          const reg = new RegExp(valObj.$regex, valObj.$options || 'i');
-          if (!reg.test(String(docVal || ''))) return false;
-        }
-      } else {
-        if (docVal !== value) return false;
-      }
-    }
-    return true;
-  }
+class MongoCollectionAdapter<T = any> implements MongoCollection<T> {
+  constructor(private readonly collection: any) {}
 
   async find(filter: any = {}, options: { sort?: any; limit?: number; skip?: number } = {}): Promise<T[]> {
-    let results = this.docs.filter((doc) => this.matchesFilter(doc, filter));
-    if (options.sort) {
-      const [sortKey, sortDir] = Object.entries(options.sort)[0] as [string, number];
-      results.sort((a, b) => {
-        if (a[sortKey] < b[sortKey]) return sortDir === -1 ? 1 : -1;
-        if (a[sortKey] > b[sortKey]) return sortDir === -1 ? -1 : 1;
-        return 0;
-      });
-    }
-    if (options.skip) results = results.slice(options.skip);
-    if (options.limit) results = results.slice(0, options.limit);
-    return JSON.parse(JSON.stringify(results));
-  }
-
-  async findOne(filter: any): Promise<T | null> {
-    const doc = this.docs.find((d) => this.matchesFilter(d, filter));
-    return doc ? JSON.parse(JSON.stringify(doc)) : null;
-  }
-
-  async insertOne(doc: any): Promise<{ insertedId: string; acknowledged: boolean }> {
-    const copy = { ...doc };
-    if (!copy._id) copy._id = copy.id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    this.docs.push(copy);
-    return { insertedId: copy._id, acknowledged: true };
-  }
-
-  async insertMany(docs: any[]): Promise<{ insertedIds: Record<number, string>; acknowledged: boolean }> {
-    const insertedIds: Record<number, string> = {};
-    docs.forEach((doc, idx) => {
-      const copy = { ...doc };
-      if (!copy._id) copy._id = copy.id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      this.docs.push(copy);
-      insertedIds[idx] = copy._id;
-    });
-    return { insertedIds, acknowledged: true };
-  }
-
-  async updateOne(filter: any, update: any, options: { upsert?: boolean } = {}): Promise<{ matchedCount: number; modifiedCount: number; upsertedId?: string }> {
-    const idx = this.docs.findIndex((d) => this.matchesFilter(d, filter));
-    if (idx === -1) {
-      if (options.upsert) {
-        const newDoc = {
-          ...filter,
-          ...(update.$set || update),
-          _id: filter._id || filter.id || `doc_${Date.now()}`,
-        };
-        this.docs.push(newDoc);
-        return { matchedCount: 0, modifiedCount: 1, upsertedId: newDoc._id };
-      }
-      return { matchedCount: 0, modifiedCount: 0 };
-    }
-    const current = this.docs[idx];
-    if (update.$set) Object.assign(current, update.$set);
-    if (update.$unset) {
-      for (const k of Object.keys(update.$unset)) delete current[k];
-    }
-    return { matchedCount: 1, modifiedCount: 1 };
-  }
-
-  async updateMany(filter: any, update: any): Promise<{ matchedCount: number; modifiedCount: number }> {
-    let count = 0;
-    for (const current of this.docs) {
-      if (this.matchesFilter(current, filter)) {
-        if (update.$set) Object.assign(current, update.$set);
-        if (update.$unset) {
-          for (const k of Object.keys(update.$unset)) delete current[k];
-        }
-        count++;
-      }
-    }
-    return { matchedCount: count, modifiedCount: count };
-  }
-
-  async deleteOne(filter: any): Promise<{ deletedCount: number }> {
-    const idx = this.docs.findIndex((d) => this.matchesFilter(d, filter));
-    if (idx !== -1) {
-      this.docs.splice(idx, 1);
-      return { deletedCount: 1 };
-    }
-    return { deletedCount: 0 };
-  }
-
-  async deleteMany(filter: any): Promise<{ deletedCount: number }> {
-    const initialLen = this.docs.length;
-    this.docs = this.docs.filter((d) => !this.matchesFilter(d, filter));
-    return { deletedCount: initialLen - this.docs.length };
-  }
-
-  async countDocuments(filter?: any): Promise<number> {
-    return this.docs.filter((d) => this.matchesFilter(d, filter)).length;
-  }
-}
-
-class RealMongoCollectionAdapter<T = any> implements MongoCollection<T> {
-  constructor(private raw: any) {}
-
-  async find(filter: any = {}, options: any = {}): Promise<T[]> {
-    let cursor = this.raw.find(filter);
+    let cursor = this.collection.find(filter);
     if (options.sort) cursor = cursor.sort(options.sort);
     if (options.skip) cursor = cursor.skip(options.skip);
     if (options.limit) cursor = cursor.limit(options.limit);
     return cursor.toArray();
   }
 
-  async findOne(filter: any): Promise<T | null> {
-    return this.raw.findOne(filter);
+  findOne(filter: any): Promise<T | null> {
+    return this.collection.findOne(filter);
   }
 
-  async insertOne(doc: T): Promise<any> {
-    return this.raw.insertOne(doc);
+  insertOne(doc: T): Promise<any> {
+    return this.collection.insertOne(doc);
   }
 
-  async insertMany(docs: T[]): Promise<any> {
-    return this.raw.insertMany(docs);
+  insertMany(docs: T[]): Promise<any> {
+    return this.collection.insertMany(docs);
   }
 
-  async updateOne(filter: any, update: any, options: any = {}): Promise<any> {
-    return this.raw.updateOne(filter, update, options);
+  updateOne(filter: any, update: any, options: { upsert?: boolean } = {}): Promise<any> {
+    return this.collection.updateOne(filter, update, options);
   }
 
-  async updateMany(filter: any, update: any): Promise<any> {
-    return this.raw.updateMany(filter, update);
+  updateMany(filter: any, update: any): Promise<any> {
+    return this.collection.updateMany(filter, update);
   }
 
-  async deleteOne(filter: any): Promise<any> {
-    return this.raw.deleteOne(filter);
+  deleteOne(filter: any): Promise<any> {
+    return this.collection.deleteOne(filter);
   }
 
-  async deleteMany(filter: any): Promise<any> {
-    return this.raw.deleteMany(filter);
+  deleteMany(filter: any): Promise<any> {
+    return this.collection.deleteMany(filter);
   }
 
-  async countDocuments(filter: any = {}): Promise<number> {
-    return this.raw.countDocuments(filter);
+  countDocuments(filter: any = {}): Promise<number> {
+    return this.collection.countDocuments(filter);
   }
 }
 
-let realClient: MongoClient | null = null;
 let realDb: Db | null = null;
 let isConnectedToRealMongo = false;
-const inMemoryCollections = new Map<string, InMemoryCollection>();
-
-function getInitialSeedForCollection(name: string): any[] {
-  switch (name) {
-    case 'projects': return SEED_PROJECTS;
-    case 'blogs': return SEED_BLOGS;
-    case 'reviews': return SEED_REVIEWS;
-    case 'staff_users': return SEED_STAFF;
-    case 'clients': return SEED_CLIENTS;
-    case 'offices': return SEED_OFFICES;
-    case 'teams': return SEED_TEAMS;
-    case 'platform_settings': return [SEED_SETTINGS];
-    default: return [];
-  }
-}
 
 export async function initMongo(): Promise<void> {
-  const uri = process.env.MONGODB_URI || 'mongodb+srv://codexdynamics:Qwerty100@cluster0.6shrdkk.mongodb.net/?appName=Cluster0';
+  const uri = process.env.MONGODB_URI?.trim();
   const dbName = process.env.MONGODB_DATABASE || 'codex_dynamics';
-
-  if (uri && uri.trim()) {
-    try {
-      console.log(`[mongo] Connecting to MongoDB at ${uri.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@')}...`);
-      const client = new MongoClient(uri, { serverSelectionTimeoutMS: 3000 });
-      await client.connect();
-      realClient = client;
-      realDb = client.db(dbName);
-      isConnectedToRealMongo = true;
-      console.log(`[mongo] Connected successfully to database: ${dbName}`);
-
-      // Seed real collections if empty
-      const collectionsToCheck = [
-        ['projects', SEED_PROJECTS],
-        ['blogs', SEED_BLOGS],
-        ['reviews', SEED_REVIEWS],
-        ['staff_users', SEED_STAFF],
-        ['clients', SEED_CLIENTS],
-        ['offices', SEED_OFFICES],
-        ['teams', SEED_TEAMS],
-        ['platform_settings', [SEED_SETTINGS]],
-      ] as const;
-
-      for (const [colName, initialData] of collectionsToCheck) {
-        const col = realDb.collection(colName);
-        const count = await col.countDocuments();
-        if (count === 0 && initialData.length > 0) {
-          await col.insertMany(initialData as any);
-          console.log(`[mongo] Seeded ${initialData.length} records into ${colName}`);
-        }
-      }
-      return;
-    } catch (err: any) {
-      console.warn(`[mongo] Could not connect to remote MongoDB (${err?.message || err}). Initializing in-memory Mongo collection engine.`);
-    }
-  } else {
-    console.log('[mongo] MONGODB_URI not configured. Initializing active in-memory Mongo collection engine.');
+  if (!uri) {
+    throw new Error('MONGODB_URI is required. CRM APIs only run with MongoDB configured.');
+  }
+  if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
+    throw new Error('MONGODB_URI must use the mongodb:// or mongodb+srv:// scheme.');
   }
 
-  // Preload in-memory collections with default seeds
-  const defaultCollections = ['projects', 'blogs', 'reviews', 'staff_users', 'clients', 'offices', 'teams', 'platform_settings', 'client_projects', 'client_support_tickets', 'notifications', 'messages', 'audit_logs', 'invoices'];
-  for (const name of defaultCollections) {
-    if (!inMemoryCollections.has(name)) {
-      inMemoryCollections.set(name, new InMemoryCollection(getInitialSeedForCollection(name)));
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 3000 });
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    const collectionsToCheck = [
+      ['projects', SEED_PROJECTS],
+      ['blogs', SEED_BLOGS],
+      ['reviews', SEED_REVIEWS],
+      ['staff_users', SEED_STAFF],
+      ['clients', SEED_CLIENTS],
+      ['offices', SEED_OFFICES],
+      ['teams', SEED_TEAMS],
+      ['platform_settings', [SEED_SETTINGS]],
+    ] as const;
+
+    for (const [collectionName, initialData] of collectionsToCheck) {
+      const collection = db.collection(collectionName);
+      const count = await collection.countDocuments();
+      if (count === 0 && initialData.length > 0) {
+        await collection.insertMany(initialData as any);
+        console.log(`[mongo] Seeded ${initialData.length} records into ${collectionName}`);
+      }
     }
+
+    realDb = db;
+    isConnectedToRealMongo = true;
+    console.log(`[mongo] Connected to database: ${dbName}`);
+  } catch {
+    await client.close().catch(() => {});
+    console.error('[mongo] Could not connect to or initialize the configured MongoDB database.');
+    throw new Error('MongoDB connection or initialization failed. CRM APIs are unavailable.');
   }
 }
 
 export function getMongoCollection<T = any>(name: string): MongoCollection<T> {
-  if (isConnectedToRealMongo && realDb) {
-    return new RealMongoCollectionAdapter<T>(realDb.collection(name));
+  if (!isConnectedToRealMongo || !realDb) {
+    throw new Error('MongoDB is not connected. CRM data is unavailable.');
   }
-  if (!inMemoryCollections.has(name)) {
-    inMemoryCollections.set(name, new InMemoryCollection<T>(getInitialSeedForCollection(name)));
-  }
-  return inMemoryCollections.get(name)! as MongoCollection<T>;
+  return new MongoCollectionAdapter<T>(realDb.collection(name));
 }
 
 export function isMongoConnected(): boolean {

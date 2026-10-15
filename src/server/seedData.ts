@@ -179,7 +179,7 @@ export const SEED_STAFF = [
   {
     id: "staff_super_admin",
     email: "admin@codexdynamics.com",
-    password: "admin123", // or Codex2025!
+    password: "Codex2025!",
     name: "Codex Super Admin",
     role: "super-admin",
     office_id: "off_1",

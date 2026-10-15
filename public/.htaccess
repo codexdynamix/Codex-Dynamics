@@ -4,11 +4,6 @@
   RewriteBase /
 
   # Secure database files from direct browser HTTP access
-  <FilesMatch "\.(sqlite|sqlite3|db)$">
-    Order deny,allow
-    Deny from all
-  </FilesMatch>
-
   # Single Page Application (SPA) Fallback for static builds
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d

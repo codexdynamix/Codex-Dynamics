@@ -389,7 +389,7 @@ export function ImagePickerModal({
                   {isUploading ? "Uploading picture to server..." : "Click or drag picture here to upload"}
                 </p>
                 <p className="text-xs text-neutral-500 mt-1 max-w-sm">
-                  Supports WebP, JPG, PNG, and SVG. Persisted permanently in SQLite and served through the public uploads API.
+                  Supports WebP, JPG, PNG, and SVG. Saved through the CRM upload API and served publicly.
                 </p>
               </div>
 

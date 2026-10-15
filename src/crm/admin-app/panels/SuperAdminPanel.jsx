@@ -2306,6 +2306,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
   const [officeId, setOfficeId] = useState('');
   const [officeName, setOfficeName] = useState('');
   const [managerName, setManagerName] = useState('');
+  const [managerEmail, setManagerEmail] = useState('');
   const [managerPassword, setManagerPassword] = useState('');
   const [newManager, setNewManager] = useState(null);
   const [omStandalone, setOmStandalone] = useState(false);
@@ -2314,6 +2315,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
   const [tlStandaloneleader, setTlStandaloneleader] = useState(false);
   const [tlTeamName, setTlTeamName] = useState('');
   const [tlleaderName, setTlleaderName] = useState('');
+  const [tlleaderEmail, setTlleaderEmail] = useState('');
   const [tlleaderPassword, setTlleaderPassword] = useState('');
   const [tlTeamSize, setTlTeamSize] = useState('');
   const [newTeamLeader, setNewTeamLeader] = useState(null);
@@ -3376,20 +3378,26 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
                             <label>{omStandalone ? 'Manager Name' : 'Manager Name (optional)'}</label>
                             <input className="crm-super-admin-input" autoComplete="off" placeholder="Manager name..." value={managerName} onChange={e => setManagerName(e.target.value)} />
                           </div>
+                          {omStandalone && (
+                            <div className="crm-super-admin-form-group">
+                              <label>Manager Email</label>
+                              <input className="crm-super-admin-input" autoComplete="email" placeholder="manager@example.com" type="email" value={managerEmail} onChange={e => setManagerEmail(e.target.value)} />
+                            </div>
+                          )}
                           <div className="crm-super-admin-form-group">
                             <label>{omStandalone ? 'Password' : 'Password (optional)'}</label>
                             <input className="crm-super-admin-input" autoComplete="new-password" placeholder="Password..." type="password" value={managerPassword} onChange={e => setManagerPassword(e.target.value)} />
                           </div>
                           <div className="crm-super-admin-form-group crm-inline-5b71234e2c" >
                             <label className="crm-inline-8a461919d2">_</label>
-                            <button className="crm-super-admin-btn" disabled={omStandalone ? (!managerName.trim() || !managerPassword) : (!officeName.trim() || Boolean(managerName.trim()) !== Boolean(managerPassword))} onClick={async () => {
+                            <button className="crm-super-admin-btn" disabled={omStandalone ? (!managerName.trim() || !managerEmail.trim() || !managerPassword) : (!officeName.trim() || Boolean(managerName.trim()) !== Boolean(managerPassword))} onClick={async () => {
                               const newMgr = omStandalone
-                                ? await createStandaloneOfficeManager(managerName, managerPassword)
+                                ? await createStandaloneOfficeManager(managerName, managerEmail, managerPassword)
                                 : await createOfficeWithManager(officeName, managerName, managerPassword);
                               if (newMgr === undefined || (omStandalone && !newMgr)) return;
                               if (newMgr) setNewManager(newMgr);
                               else showNotification(`Office "${officeName}" created.`);
-                              setOfficeName(''); setManagerName(''); setManagerPassword(''); setOmStandalone(false);
+                              setOfficeName(''); setManagerName(''); setManagerEmail(''); setManagerPassword(''); setOmStandalone(false);
                               setExpandedOffices(prev => { const s = new Set(prev); s.delete('__create'); return s; });
                             }}>✓ Create</button>
                           </div>
@@ -3398,6 +3406,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
                           <div className="crm-credentials-output-container crm-inline-b26aecebd1" >
                             <h4 className="crm-inline-9dd0c440ca">Created: {newManager.name}</h4>
                             <div className="crm-credential-item"><span>Login Link</span><code>{newManager.loginLink}</code><button className="crm-link-copy-btn" onClick={() => copyToClipboard(newManager.loginLink)}>[list] Copy</button></div>
+                            <div className="crm-credential-item"><span>Email</span><code>{newManager.email}</code></div>
                             <div className="crm-credential-item"><span>Password</span><code>{newManager.password}</code><button className="crm-link-copy-btn" onClick={() => copyToClipboard(newManager.password)}>[list] Copy</button></div>
                           </div>
                         )}
@@ -3550,20 +3559,26 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
                             <label>{tlStandaloneleader ? 'leader Name' : 'leader Name (optional)'}</label>
                             <input className="crm-super-admin-input" autoComplete="off" placeholder="leader name..." value={tlleaderName} onChange={e => setTlleaderName(e.target.value)} />
                           </div>
+                          {tlStandaloneleader && (
+                            <div className="crm-super-admin-form-group">
+                              <label>Leader Email</label>
+                              <input className="crm-super-admin-input" autoComplete="email" placeholder="leader@example.com" type="email" value={tlleaderEmail} onChange={e => setTlleaderEmail(e.target.value)} />
+                            </div>
+                          )}
                           <div className="crm-super-admin-form-group">
                             <label>{tlStandaloneleader ? 'Password' : 'Password (optional)'}</label>
                             <input className="crm-super-admin-input" autoComplete="new-password" placeholder="Password..." type="password" value={tlleaderPassword} onChange={e => setTlleaderPassword(e.target.value)} />
                           </div>
                           <div className="crm-super-admin-form-group crm-inline-5b71234e2c" >
                             <label className="crm-inline-8a461919d2">_</label>
-                            <button className="crm-super-admin-btn" disabled={tlStandaloneleader ? (!tlleaderName.trim() || !tlleaderPassword) : (!tlTeamName.trim() || Boolean(tlleaderName.trim()) !== Boolean(tlleaderPassword))} onClick={async () => {
+                            <button className="crm-super-admin-btn" disabled={tlStandaloneleader ? (!tlleaderName.trim() || !tlleaderEmail.trim() || !tlleaderPassword) : (!tlTeamName.trim() || Boolean(tlleaderName.trim()) !== Boolean(tlleaderPassword))} onClick={async () => {
                               const newTl = tlStandaloneleader
-                                ? await createStandaloneTeamLeader(tlOfficeId || null, tlleaderName, tlleaderPassword)
+                                ? await createStandaloneTeamLeader(tlOfficeId || null, tlleaderName, tlleaderEmail, tlleaderPassword)
                                 : await createTeamLeader(tlOfficeId || null, tlTeamName, tlleaderName, tlleaderPassword, tlTeamSize);
                               if (newTl === undefined || (tlStandaloneleader && !newTl)) return;
                               if (newTl) setNewTeamLeader(newTl);
                               else showNotification(`Team "${tlTeamName}" created.`);
-                              setTlOfficeId(''); setTlTeamName(''); setTlleaderName(''); setTlleaderPassword(''); setTlTeamSize(''); setTlStandaloneleader(false);
+                              setTlOfficeId(''); setTlTeamName(''); setTlleaderName(''); setTlleaderEmail(''); setTlleaderPassword(''); setTlTeamSize(''); setTlStandaloneleader(false);
                               setExpandedTeams(prev => { const s = new Set(prev); s.delete('__create'); return s; });
                             }}>✓ Create</button>
                           </div>
@@ -3572,6 +3587,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
                           <div className="crm-credentials-output-container crm-inline-b26aecebd1" >
                             <h4 className="crm-inline-9dd0c440ca">Created: {newTeamLeader.name}</h4>
                             <div className="crm-credential-item"><span>Login Link</span><code>{newTeamLeader.loginLink}</code><button className="crm-link-copy-btn" onClick={() => copyToClipboard(newTeamLeader.loginLink)}>[list] Copy</button></div>
+                            <div className="crm-credential-item"><span>Email</span><code>{newTeamLeader.email}</code></div>
                             <div className="crm-credential-item"><span>Password</span><code>{newTeamLeader.password}</code><button className="crm-link-copy-btn" onClick={() => copyToClipboard(newTeamLeader.password)}>[list] Copy</button></div>
                           </div>
                         )}

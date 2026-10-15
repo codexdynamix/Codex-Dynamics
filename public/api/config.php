@@ -1,22 +1,13 @@
 <?php
 /**
- * Codex Dynamics - MongoDB Configuration for Hostinger Shared Hosting
- *
- * 1. Enable 'mongodb' in Hostinger hPanel -> Advanced -> PHP Configuration -> PHP Extensions
- * 2. MongoDB Atlas cluster credentials configured below.
+ * Runtime configuration for the Hostinger API.
+ * Set MONGODB_URI in the hosting environment; credentials do not belong here.
  */
 
 return [
-    // MongoDB Atlas URI
-    'mongodb_uri' => 'mongodb+srv://codexdynamics:Qwerty100@cluster0.6shrdkk.mongodb.net/?appName=Cluster0',
-
-    // Database name in MongoDB
-    'mongodb_database' => 'codex_dynamics',
-
-    // Default Super Admin credentials for bootstrap
-    'admin_email' => 'admin@codexdynamics.com',
-    'admin_password' => 'admin123',
-
-    // Allowed CORS Origins
-    'cors_allowed_origins' => '*',
+    'mongodb_uri' => getenv('MONGODB_URI') ?: '',
+    'mongodb_database' => getenv('MONGODB_DATABASE') ?: 'codex_dynamics',
+    'admin_email' => getenv('ADMIN_EMAIL') ?: 'admin@codexdynamics.com',
+    'admin_password' => getenv('ADMIN_PASSWORD') ?: 'Codex2025!',
+    'cors_allowed_origins' => getenv('CORS_ALLOWED_ORIGINS') ?: '*',
 ];

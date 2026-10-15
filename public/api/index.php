@@ -57,14 +57,19 @@ class MongoService {
         self::$databaseName = $dbName;
         self::$isExtensionLoaded = extension_loaded('mongodb');
 
-        if (self::$isExtensionLoaded && !empty($uri) && str_starts_with($uri, 'mongodb')) {
-            try {
-                if (class_exists('MongoDB\\Client')) {
-                    self::$client = new MongoDB\Client($uri, [], ['serverSelectionTimeoutMS' => 4000]);
-                }
-            } catch (Throwable $e) {
-                error_log('[MongoService] Connection error: ' . $e->getMessage());
-            }
+        if (!self::$isExtensionLoaded || !class_exists('MongoDB\\Client')) {
+            jsonOut(['ok' => false, 'error' => 'MongoDB PHP support is required.'], 503);
+        }
+        if (!str_starts_with($uri, 'mongodb://') && !str_starts_with($uri, 'mongodb+srv://')) {
+            jsonOut(['ok' => false, 'error' => 'MONGODB_URI is required to use this API.'], 503);
+        }
+
+        try {
+            self::$client = new MongoDB\Client($uri, [], ['serverSelectionTimeoutMS' => 4000]);
+            self::$client->selectDatabase($dbName)->command(['ping' => 1]);
+        } catch (Throwable $e) {
+            error_log('[MongoService] Could not connect to the configured MongoDB database.');
+            jsonOut(['ok' => false, 'error' => 'MongoDB is unavailable.'], 503);
         }
     }
 
@@ -81,163 +86,36 @@ class MongoService {
     }
 
     public static function getCollection(string $name): array {
-        if (self::$client !== null) {
-            try {
-                $db = self::$client->selectDatabase(self::$databaseName);
-                $col = $db->selectCollection($name);
-                $cursor = $col->find([], ['limit' => 200]);
-                $results = [];
-                foreach ($cursor as $doc) {
-                    $arr = (array)$doc;
-                    unset($arr['_id']);
-                    $results[] = $arr;
-                }
-                return $results;
-            } catch (Throwable $e) {
-                error_log("[MongoService] Read error on {$name}: " . $e->getMessage());
-            }
+        $col = self::$client->selectDatabase(self::$databaseName)->selectCollection($name);
+        $cursor = $col->find([], ['limit' => 200]);
+        $results = [];
+        foreach ($cursor as $doc) {
+            $arr = (array)$doc;
+            unset($arr['_id']);
+            $results[] = $arr;
         }
-        return self::fallbackSeed($name);
+        return $results;
     }
 
     public static function insert(string $name, array $doc): array {
-        if (self::$client !== null) {
-            try {
-                $db = self::$client->selectDatabase(self::$databaseName);
-                $col = $db->selectCollection($name);
-                if (!isset($doc['id'])) {
-                    $doc['id'] = 'doc_' . time() . '_' . substr(bin2hex(random_bytes(4)), 0, 6);
-                }
-                $doc['created_at'] = $doc['created_at'] ?? date('c');
-                $col->insertOne($doc);
-                unset($doc['_id']);
-                return $doc;
-            } catch (Throwable $e) {
-                error_log("[MongoService] Insert error on {$name}: " . $e->getMessage());
-            }
+        $col = self::$client->selectDatabase(self::$databaseName)->selectCollection($name);
+        if (!isset($doc['id'])) {
+            $doc['id'] = 'doc_' . time() . '_' . substr(bin2hex(random_bytes(4)), 0, 6);
         }
+        $doc['created_at'] = $doc['created_at'] ?? date('c');
+        $col->insertOne($doc);
+        unset($doc['_id']);
         return $doc;
     }
 
     public static function findOne(string $name, array $filter): ?array {
-        if (self::$client !== null) {
-            try {
-                $db = self::$client->selectDatabase(self::$databaseName);
-                $col = $db->selectCollection($name);
-                $doc = $col->findOne($filter);
-                if ($doc) {
-                    $arr = (array)$doc;
-                    unset($arr['_id']);
-                    return $arr;
-                }
-                return null;
-            } catch (Throwable $e) {
-                error_log("[MongoService] FindOne error on {$name}: " . $e->getMessage());
-            }
-        }
-        $list = self::fallbackSeed($name);
-        foreach ($list as $item) {
-            $match = true;
-            foreach ($filter as $k => $v) {
-                if (($item[$k] ?? null) !== $v) {
-                    $match = false;
-                    break;
-                }
-            }
-            if ($match) return $item;
-        }
-        return null;
+        $doc = self::$client->selectDatabase(self::$databaseName)->selectCollection($name)->findOne($filter);
+        if ($doc === null) return null;
+        $result = (array)$doc;
+        unset($result['_id']);
+        return $result;
     }
 
-    private static function fallbackSeed(string $name): array {
-        if ($name === 'projects') {
-            return [
-                [
-                    'id' => 1,
-                    'title' => 'Aetherial OS',
-                    'client' => 'Aetherial Labs',
-                    'tag' => 'Spatial Computing',
-                    'category' => 'Websites & Web Apps',
-                    'image' => '/src/assets/images/aetherial_os_ui_1789862335899.jpg',
-                    'image_url' => '/src/assets/images/aetherial_os_ui_1789862335899.jpg',
-                    'shortDescription' => 'Ultra-low latency web workspace with fluid physics-based gestures.',
-                    'published' => true,
-                    'is_published' => 1,
-                ],
-                [
-                    'id' => 2,
-                    'title' => 'Apex Sales Desk',
-                    'client' => 'Apex Telephony',
-                    'tag' => 'High-Volume Telephony',
-                    'category' => 'CRMs & Calling Systems',
-                    'image' => '/src/assets/images/apex_sales_desk_1789909602200.jpg',
-                    'image_url' => '/src/assets/images/apex_sales_desk_1789909602200.jpg',
-                    'shortDescription' => 'Enterprise WebRTC dialer and real-time CRM telephony dashboard.',
-                    'published' => true,
-                    'is_published' => 1,
-                ],
-            ];
-        }
-        if ($name === 'blogs') {
-            return [
-                [
-                    'id' => 1,
-                    'title' => 'Engineering Sub-100ms Enterprise Web Apps with Modern React',
-                    'slug' => 'engineering-sub-100ms-enterprise-apps',
-                    'category' => 'Engineering',
-                    'author' => 'Codex Dynamics Core Team',
-                    'excerpt' => 'How we eliminate hydration bottlenecks and memory degradation.',
-                    'status' => 'published',
-                    'featured_image' => '/src/assets/images/web_development_1789860669506.jpg',
-                    'reading_time' => 6,
-                ],
-            ];
-        }
-        if ($name === 'reviews') {
-            return [
-                [
-                    'id' => 1,
-                    'author' => 'Julian Reynolds',
-                    'role' => 'Chief Operating Officer',
-                    'company' => 'Apex Telephony Solutions',
-                    'rating' => 5,
-                    'comment' => 'Codex Dynamics rebuilt our entire client portal and dialer architecture in under 8 weeks.',
-                    'is_published' => 1,
-                ],
-            ];
-        }
-        if ($name === 'staff_users') {
-            return [
-                [
-                    'id' => 'staff_super_admin',
-                    'email' => 'admin@codexdynamics.com',
-                    'name' => 'Codex Super Admin',
-                    'role' => 'super-admin',
-                    'officeId' => 'off_1',
-                    'teamId' => 'team_1',
-                    'status' => 'Active',
-                    'capabilities' => '["all"]',
-                ],
-            ];
-        }
-        if ($name === 'clients') {
-            return [
-                [
-                    'id' => 'client_apex_1',
-                    'name' => 'Marcus Vance',
-                    'company' => 'Apex Global Logistics',
-                    'email' => 'client@codexdynamics.com',
-                    'phone' => '+44 20 7946 0912',
-                    'country' => 'United Kingdom',
-                    'countryCode' => 'GB',
-                    'status' => 'Active',
-                    'portalEnabled' => true,
-                    'tier' => 'Enterprise Partner',
-                ],
-            ];
-        }
-        return [];
-    }
 }
 
 MongoService::init($mongoUri, $mongoDbName);
@@ -284,12 +162,14 @@ if ($path === '/public/content' || $path === '/content') {
 if ($path === '/admin/login' && $method === 'POST') {
     $email = strtolower(trim((string)($body['email'] ?? '')));
     $password = (string)($body['password'] ?? '');
+    $adminEmail = strtolower(trim((string)($config['admin_email'] ?? 'admin@codexdynamics.com')));
+    $adminPassword = (string)($config['admin_password'] ?? '');
 
     $staff = MongoService::findOne('staff_users', ['email' => $email]);
-    if (!$staff && $email === 'admin@codexdynamics.com') {
+    if (!$staff && $email === $adminEmail) {
         $staff = [
             'id' => 'staff_super_admin',
-            'email' => 'admin@codexdynamics.com',
+            'email' => $adminEmail,
             'name' => 'Codex Super Admin',
             'role' => 'super-admin',
             'officeId' => 'off_1',
@@ -300,6 +180,10 @@ if ($path === '/admin/login' && $method === 'POST') {
     }
     if (!$staff) {
         jsonOut(['ok' => false, 'error' => 'Staff account not found in MongoDB.'], 401);
+    }
+    $expectedPassword = $email === $adminEmail ? $adminPassword : (string)($staff['password'] ?? '');
+    if ($expectedPassword === '' || !hash_equals($expectedPassword, $password)) {
+        jsonOut(['ok' => false, 'error' => 'Invalid staff email or password.'], 401);
     }
     $token = 'cdx_adm_php_mongo_' . $staff['id'] . '_' . time();
     jsonOut([
@@ -533,4 +417,3 @@ if ($path === '/admin/audit') {
 
 // Default fallback
 jsonOut(['ok' => true, 'path' => $path, 'storage' => 'mongodb']);
-

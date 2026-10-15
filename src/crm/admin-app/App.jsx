@@ -857,13 +857,14 @@ function App() {
     }
   };
 
-  const createStandaloneOfficeManager = async (managerName, managerPassword) => {
+  const createStandaloneOfficeManager = async (managerName, managerEmail, managerPassword) => {
     try {
       const created = await createStaffApi({
         role: ROLE.OFFICE_MANAGER,
         officeId: null,
         teamId: null,
         name: managerName,
+        email: managerEmail,
         password: managerPassword,
       });
       const manager = {
@@ -887,13 +888,14 @@ function App() {
     }
   };
 
-  const createStandaloneTeamLeader = async (officeId, leaderName, leaderPassword) => {
+  const createStandaloneTeamLeader = async (officeId, leaderName, leaderEmail, leaderPassword) => {
     try {
       const created = await createStaffApi({
         role: ROLE.TEAM_LEAD,
         officeId: officeId || null,
         teamId: null,
         name: leaderName,
+        email: leaderEmail,
         password: leaderPassword,
       });
       const leader = {

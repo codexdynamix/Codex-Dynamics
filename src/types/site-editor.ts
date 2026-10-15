@@ -563,7 +563,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
             desc: "Domain DNS routing, SSL certificate setup, automated database backups, and DDoS protection so your site stays online 24/7.",
           },
         ],
-        techStack: ["React 19", "TypeScript", "Tailwind CSS", "Node.js", "SQLite / Postgres", "Stripe API", "Vite", "Cloudflare"],
+        techStack: ["React 19", "TypeScript", "Tailwind CSS", "Node.js", "MongoDB / Postgres", "Stripe API", "Vite", "Cloudflare"],
         timeline: "Typical Delivery: 2 to 4 Weeks",
         idealFor: "Businesses, startups, and founders needing high-performing sites that scale without monthly builder subscription lock-ins.",
         offYourPlate: "No wrestling with broken WordPress plugins, outdated PHP versions, or unreliable offshore developers.",

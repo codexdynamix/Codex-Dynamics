@@ -18,15 +18,16 @@ This guide walks you through deploying Codex Dynamics with **PHP 8.0+** and **Mo
 
 ## 2. Configure MongoDB Atlas Connection
 
-1. In `public/api/config.php`, paste your MongoDB Atlas URI:
+1. Set `MONGODB_URI` and `MONGODB_DATABASE` in your hosting environment. MongoDB connection details should not be committed to `config.php`.
    ```php
    return [
-       'mongodb_uri' => 'mongodb+srv://<username>:<password>@cluster0.mongodb.net/?retryWrites=true&w=majority',
-       'mongodb_database' => 'codex_dynamics',
+       'mongodb_uri' => getenv('MONGODB_URI') ?: '',
+       'mongodb_database' => getenv('MONGODB_DATABASE') ?: 'codex_dynamics',
        'admin_email' => 'admin@codexdynamics.com',
-       'admin_password' => 'admin123',
+       'admin_password' => 'Codex2025!',
    ];
    ```
+   Requests fail with `503 Service Unavailable` when MongoDB is not configured or cannot be reached; the API does not serve fallback data.
 2. In MongoDB Atlas, ensure your **Network Access** IP Access List allows connections from Hostinger (or `0.0.0.0/0` with strong database user credentials).
 
 ---

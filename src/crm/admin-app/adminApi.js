@@ -10,6 +10,7 @@
  */
 
 import { portalDb } from '../../services/portalDatabase';
+import { normalizeAdminRole } from '../roleNormalization.js';
 
 const TOKEN_KEY   = 'codex_admin_token';
 // The real session token lives in an HttpOnly cookie; storage only keeps this marker.
@@ -78,7 +79,7 @@ export function mapAdminToUser(admin) {
     id:          admin.id,
     name:        admin.name,
     email:       admin.email,
-    role:        admin.role,
+    role:        normalizeAdminRole(admin.role),
     officeId:    admin.office_id  ?? null,
     teamId:      admin.team_id    ?? null,
     status:      admin.status     ?? 'Active',
@@ -110,6 +111,7 @@ export async function adminLogin(email, password, requestedRole) {
   if (!res.ok || !data.ok || !data.user || !data.token) {
     throw new Error(data.error || 'Sign in failed. Please check your credentials and try again.');
   }
+  data.user.role = normalizeAdminRole(data.user.role);
   setAdminToken();
   setStoredAdminProfile(data.user);
   return data.user;
@@ -153,6 +155,7 @@ export async function fetchAdminMe() {
     clearAdminSession();
     return null;
   }
+  data.user.role = normalizeAdminRole(data.user.role);
   setStoredAdminProfile(data.user);
   return data.user;
 }
@@ -829,7 +832,7 @@ function mapStaffRow(s) {
     id:          s.id,
     name:        s.name,
     email:       s.email,
-    role:        s.role,
+    role:        normalizeAdminRole(s.role),
     officeId:    s.office_id ?? null,
     officeName:  s.office_name ?? null,
     teamId:      s.team_id ?? null,

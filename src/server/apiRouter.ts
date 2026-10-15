@@ -1,7 +1,38 @@
 import { Router, Request, Response } from 'express';
 import { getMongoCollection, isMongoConnected, getDatabaseName } from './mongo.ts';
+import { SEED_STAFF } from './seedData.ts';
+import { normalizeAdminRole } from '../crm/roleNormalization.js';
 
 export const apiRouter = Router();
+const seededSuperAdmin = SEED_STAFF.find((staff) => staff.id === 'staff_super_admin');
+const STAFF_CAPABILITY_CATALOG = {
+  client_upload: 'Client Upload',
+  create_agent: 'Create Agent',
+  registrations: 'Registrations',
+  notifications: 'Notifications',
+  security: 'Security',
+  content: 'Content',
+  enquiries: 'Enquiries',
+  chat: 'Chat',
+} as const;
+const DEFAULT_STAFF_CAPABILITIES = Object.fromEntries(
+  Object.keys(STAFF_CAPABILITY_CATALOG).map((key) => [key, true])
+);
+
+function decodeStaffCapabilities(value: unknown): Record<string, boolean> {
+  let decoded = value;
+  if (typeof decoded === 'string') {
+    try {
+      decoded = JSON.parse(decoded);
+    } catch {
+      return {};
+    }
+  }
+  if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) return {};
+  return Object.fromEntries(
+    Object.entries(decoded).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')
+  );
+}
 
 // CORS & Middleware
 apiRouter.use((_req, res, next) => {
@@ -21,8 +52,20 @@ apiRouter.get('/healthz', async (_req: Request, res: Response) => {
     storage: 'mongodb',
     database: getDatabaseName(),
     connected: isMongoConnected(),
+    ...(isMongoConnected() ? {} : { error: 'MongoDB is not connected. Configure MONGODB_URI to enable CRM APIs.' }),
     timestamp: new Date().toISOString(),
   });
+});
+
+apiRouter.use((_req: Request, res: Response, next) => {
+  if (!isMongoConnected()) {
+    return res.status(503).json({
+      ok: false,
+      storage: 'mongodb',
+      error: 'MongoDB is not connected. Configure MONGODB_URI to enable CRM APIs.',
+    });
+  }
+  next();
 });
 
 // ---------------------------------------------------------------------------
@@ -96,6 +139,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
       staff = {
         id: 'staff_super_admin',
         email: 'admin@codexdynamics.com',
+        password: seededSuperAdmin?.password,
         name: 'Codex Super Admin',
         role: 'super-admin',
         office_id: 'off_1',
@@ -112,12 +156,17 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
       return res.status(401).json({ ok: false, error: 'Staff account not found in MongoDB.' });
     }
 
-    if (password && staff.password && staff.password !== password && password !== 'admin123' && password !== 'Codex2025!') {
+    const expectedPassword = staff.password;
+    if (!expectedPassword || password !== expectedPassword) {
       return res.status(401).json({ ok: false, error: 'Invalid password.' });
     }
 
+    const canonicalRole = normalizeAdminRole(staff.role || role || 'super-admin');
     const token = `cdx_adm_mongo_${staff.id}_${Date.now()}`;
-    await staffCol.updateOne({ id: staff.id }, { $set: { last_login_at: new Date().toISOString() } });
+    await staffCol.updateOne(
+      { id: staff.id },
+      { $set: { role: canonicalRole, last_login_at: new Date().toISOString() } }
+    );
 
     res.json({
       ok: true,
@@ -126,7 +175,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
         id: staff.id,
         email: staff.email,
         name: staff.name,
-        role: staff.role || role || 'super-admin',
+        role: canonicalRole,
         officeId: staff.officeId || staff.office_id || 'off_1',
         teamId: staff.teamId || staff.team_id || 'team_1',
         status: staff.status || 'Active',
@@ -141,7 +190,9 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
 apiRouter.get('/admin/me', async (_req: Request, res: Response) => {
   try {
     const staffCol = getMongoCollection('staff_users');
-    const staff = (await staffCol.findOne({ role: 'super-admin' })) || {
+    const staff = (await staffCol.findOne({
+      role: { $regex: '^super[\\s_-]*admin$', $options: 'i' },
+    })) || {
       id: 'staff_super_admin',
       email: 'admin@codexdynamics.com',
       name: 'Codex Super Admin',
@@ -165,7 +216,7 @@ apiRouter.post('/admin/me/password', async (req: Request, res: Response) => {
 
     const staffCol = getMongoCollection('staff_users');
     await staffCol.updateOne(
-      { role: 'super-admin' },
+      { role: { $regex: '^super[\\s_-]*admin$', $options: 'i' } },
       { $set: { password: targetPassword, updated_at: new Date().toISOString() } }
     );
     res.json({ ok: true, message: 'Password updated successfully in MongoDB.' });
@@ -195,6 +246,55 @@ apiRouter.post('/admin/staff', async (req: Request, res: Response) => {
   };
   await getMongoCollection('staff_users').insertOne(newStaff);
   res.json({ ok: true, staff: newStaff });
+});
+
+apiRouter.get('/admin/staff/:id/capabilities', async (req: Request, res: Response) => {
+  try {
+    const staff = await getMongoCollection('staff_users').findOne({ id: req.params.id });
+    if (!staff) return res.status(404).json({ ok: false, error: 'Staff member not found.' });
+    return res.json({
+      ok: true,
+      catalog: STAFF_CAPABILITY_CATALOG,
+      capabilities: {
+        ...DEFAULT_STAFF_CAPABILITIES,
+        ...decodeStaffCapabilities(staff.capabilities),
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+apiRouter.put('/admin/staff/:id/capabilities', async (req: Request, res: Response) => {
+  try {
+    const staffCollection = getMongoCollection('staff_users');
+    const staff = await staffCollection.findOne({ id: req.params.id });
+    if (!staff) return res.status(404).json({ ok: false, error: 'Staff member not found.' });
+
+    const requested = req.body?.capabilities;
+    if (!requested || typeof requested !== 'object' || Array.isArray(requested)) {
+      return res.status(422).json({ ok: false, error: 'A capabilities object is required.' });
+    }
+    const requestedEntries = Object.entries(requested);
+    if (requestedEntries.some(([key, value]) => (
+      !Object.hasOwn(STAFF_CAPABILITY_CATALOG, key) || typeof value !== 'boolean'
+    ))) {
+      return res.status(422).json({
+        ok: false,
+        error: 'Capabilities must use supported names and boolean values.',
+      });
+    }
+
+    const capabilities = {
+      ...DEFAULT_STAFF_CAPABILITIES,
+      ...decodeStaffCapabilities(staff.capabilities),
+      ...Object.fromEntries(requestedEntries),
+    };
+    await staffCollection.updateOne({ id: req.params.id }, { $set: { capabilities } });
+    return res.json({ ok: true, capabilities });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 apiRouter.patch('/admin/staff/:id', async (req: Request, res: Response) => {
