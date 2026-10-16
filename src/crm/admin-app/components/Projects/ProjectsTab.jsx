@@ -43,6 +43,7 @@ const CATEGORIES = [
   'Email Marketing',
   'Custom Software',
 ];
+const PROJECT_CATEGORIES = CATEGORIES.filter((category) => category !== 'All');
 
 const normalizeProject = (project) => ({
   ...project,
@@ -62,6 +63,7 @@ const normalizeProject = (project) => ({
 
 export default function ProjectsTab({ showNotification = () => {} }) {
   const [projects, setProjects] = useState([]);
+  const [savedCategories, setSavedCategories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -76,6 +78,9 @@ export default function ProjectsTab({ showNotification = () => {} }) {
   const [editingProject, setEditingProject] = useState(null);
   const [previewModalProject, setPreviewModalProject] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState('');
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
   const interactionInProgressRef = useRef(false);
   const refreshInProgressRef = useRef(false);
   interactionInProgressRef.current = isSaving || isUploadingImage || isModalOpen;
@@ -90,6 +95,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
     try {
       const content = await getAdminSiteContent();
       setProjects((content.projects || []).map(normalizeProject));
+      setSavedCategories(Array.isArray(content.categories) ? content.categories : []);
       return { ok: true };
     } catch (error) {
       const message = error.message || 'Portfolio projects could not be loaded.';
@@ -100,6 +106,46 @@ export default function ProjectsTab({ showNotification = () => {} }) {
       setIsLoading(false);
     }
   }, []);
+
+  const categoryOptions = useMemo(() => {
+    const categories = new Map();
+    for (const category of [...PROJECT_CATEGORIES, ...savedCategories, ...projects.map((project) => project.category)]) {
+      const name = String(category || '').trim();
+      if (name && !categories.has(name.toLocaleLowerCase())) {
+        categories.set(name.toLocaleLowerCase(), name);
+      }
+    }
+    return ['All', ...categories.values()];
+  }, [projects, savedCategories]);
+
+  const handleAddCategory = async (event) => {
+    event.preventDefault();
+    const name = categoryDraft.trim();
+    if (!name) return;
+    if (name.length > 60) {
+      showNotification('Category names must be 60 characters or fewer.');
+      return;
+    }
+    if (categoryOptions.some((category) => category.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      showNotification('That project category already exists.');
+      return;
+    }
+
+    setIsSavingCategory(true);
+    try {
+      const result = await runAdminSiteContentAction('create', { name }, 'project_category');
+      const savedName = String(result.category?.name || name).trim();
+      setSavedCategories((current) => [...current, savedName]);
+      setActiveCategory(savedName);
+      setCategoryDraft('');
+      setIsAddingCategory(false);
+      showNotification(`Added project category "${savedName}".`);
+    } catch (error) {
+      showNotification(error.message || 'The project category could not be added.');
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
 
   useEffect(() => {
     void refreshProjects({ force: true, showLoading: true });
@@ -712,7 +758,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
 
         {/* Category Pills */}
         <div className="crm-proj-category-pills">
-          {CATEGORIES.map(cat => (
+          {categoryOptions.map(cat => (
             <button
               key={cat}
               type="button"
@@ -722,6 +768,49 @@ export default function ProjectsTab({ showNotification = () => {} }) {
               {cat}
             </button>
           ))}
+          {!isAddingCategory ? (
+            <button
+              type="button"
+              className="crm-proj-cat-pill"
+              onClick={() => setIsAddingCategory(true)}
+              aria-label="Add a project category"
+            >
+              <Plus size={13} />
+              <span>Add Category</span>
+            </button>
+          ) : (
+            <form
+              onSubmit={handleAddCategory}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+            >
+              <input
+                type="text"
+                value={categoryDraft}
+                onChange={(event) => setCategoryDraft(event.target.value)}
+                placeholder="New category name"
+                aria-label="New project category name"
+                maxLength={60}
+                autoFocus
+                required
+                disabled={isSavingCategory}
+                style={{ minWidth: 180, padding: '8px 10px', borderRadius: 8 }}
+              />
+              <button type="submit" className="crm-btn-secondary" disabled={isSavingCategory}>
+                {isSavingCategory ? 'Adding…' : 'Add'}
+              </button>
+              <button
+                type="button"
+                className="crm-btn-secondary"
+                onClick={() => {
+                  setIsAddingCategory(false);
+                  setCategoryDraft('');
+                }}
+                disabled={isSavingCategory}
+              >
+                Cancel
+              </button>
+            </form>
+          )}
         </div>
       </div>
 
@@ -1149,7 +1238,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                       value={formData.category}
                       onChange={e => setFormData({ ...formData, category: e.target.value })}
                     >
-                      {CATEGORIES.filter(c => c !== 'All').map(cat => (
+                      {categoryOptions.filter(c => c !== 'All').map(cat => (
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
                     </select>

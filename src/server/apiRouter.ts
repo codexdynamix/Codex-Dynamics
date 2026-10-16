@@ -76,16 +76,27 @@ apiRouter.use((_req: Request, res: Response, next) => {
 // ---------------------------------------------------------------------------
 const handlePublicContent = async (_req: Request, res: Response) => {
   try {
-    const [projects, blogs, reviews] = await Promise.all([
+    const [projects, blogs, reviews, projectCategories] = await Promise.all([
       getMongoCollection('projects').find({ published: { $ne: false } }),
       getMongoCollection('blogs').find({ status: 'published' }),
       getMongoCollection('reviews').find({ is_published: { $ne: 0 } }),
+      getMongoCollection('project_categories').find(),
     ]);
+    const categories = new Map<string, string>();
+    for (const category of projectCategories) {
+      const name = String(category.name || '').trim();
+      if (name) categories.set(name.toLocaleLowerCase(), name);
+    }
+    for (const project of projects) {
+      const name = String(project.category || '').trim();
+      if (name) categories.set(name.toLocaleLowerCase(), name);
+    }
 
     res.json({
       ok: true,
       storage: 'mongodb',
       projects: projects.map((p) => ({ ...p, id: p.id || p._id, is_published: true, published: true })),
+      categories: [...categories.values()],
       blogs: blogs.map((b) => ({ ...b, id: b.id || b._id })),
       reviews: reviews.map((r) => ({ ...r, id: r.id || r._id })),
       backlinks: [],
@@ -724,18 +735,45 @@ apiRouter.get('/admin/client-identity-reviews', async (_req: Request, res: Respo
 // 6. CONTENT STUDIO & SEO
 // ---------------------------------------------------------------------------
 apiRouter.get('/admin/site-content', async (_req: Request, res: Response) => {
-  const [projects, blogs, reviews, settings] = await Promise.all([
+  const [projects, blogs, reviews, settings, projectCategories] = await Promise.all([
     getMongoCollection('projects').find(),
     getMongoCollection('blogs').find(),
     getMongoCollection('reviews').find(),
     getMongoCollection('platform_settings').findOne({}),
+    getMongoCollection('project_categories').find(),
   ]);
-  res.json({ ok: true, projects, blogs, reviews, settings: settings || {} });
+  const categories = new Map<string, string>();
+  for (const category of projectCategories) {
+    const name = String(category.name || '').trim();
+    if (name) categories.set(name.toLocaleLowerCase(), name);
+  }
+  for (const project of projects) {
+    const name = String(project.category || '').trim();
+    if (name) categories.set(name.toLocaleLowerCase(), name);
+  }
+  res.json({ ok: true, projects, blogs, reviews, settings: settings || {}, categories: [...categories.values()] });
 });
 
 apiRouter.post('/admin/site-content/action', async (req: Request, res: Response) => {
   try {
     const { type, action, item, id } = req.body || {};
+    if (type === 'project_category') {
+      if (action !== 'create' && action !== 'add') {
+        return res.status(400).json({ ok: false, error: 'Only project category creation is supported.' });
+      }
+      const name = String(item?.name || '').trim();
+      if (!name || name.length > 60) {
+        return res.status(422).json({ ok: false, error: 'Category names must be between 1 and 60 characters.' });
+      }
+      const categoryCollection = getMongoCollection('project_categories');
+      const existingCategories = await categoryCollection.find();
+      if (existingCategories.some((category) => String(category.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+        return res.status(409).json({ ok: false, error: 'That project category already exists.' });
+      }
+      const category = { id: `project-category-${randomUUID()}`, name };
+      await categoryCollection.insertOne(category);
+      return res.json({ ok: true, category });
+    }
     const colName = type === 'blog' ? 'blogs' : type === 'review' ? 'reviews' : 'projects';
     const col = getMongoCollection(colName);
 

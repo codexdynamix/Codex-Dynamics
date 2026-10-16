@@ -27,6 +27,7 @@ const DEFAULT_CATEGORIES = [
   "Graphic Design & Branding",
   "Meta & Google Ads",
   "Email Marketing",
+  "Custom Software",
 ];
 
 function normalizeProject(project: any): ShowcaseProject {
@@ -58,6 +59,7 @@ function normalizeProject(project: any): ShowcaseProject {
 
 export function ProjectShowcaseGrid() {
   const [projects, setProjects] = useState<ShowcaseProject[]>([]);
+  const [savedCategories, setSavedCategories] = useState<string[]>([]);
   const [projectsError, setProjectsError] = useState("");
 
   // Published portfolio records are read from the shared database-backed API.
@@ -76,6 +78,7 @@ export function ProjectShowcaseGrid() {
         }
         if (!active) return;
         setProjects(payload.projects.map(normalizeProject));
+        setSavedCategories(Array.isArray(payload.categories) ? payload.categories : []);
         setProjectsError("");
       } catch (error) {
         if (!active) return;
@@ -120,13 +123,18 @@ export function ProjectShowcaseGrid() {
     for (const c of DEFAULT_CATEGORIES.slice(1)) {
       set.add(c);
     }
+    for (const category of savedCategories) {
+      if (category && category.trim() && category.trim() !== "All") {
+        set.add(category.trim());
+      }
+    }
     for (const p of projects) {
       if (p.category && p.category.trim() && p.category.trim() !== "All") {
         set.add(p.category.trim());
       }
     }
     return Array.from(set);
-  }, [projects]);
+  }, [projects, savedCategories]);
 
   // Filtered & Searched Projects
   const filteredProjects = useMemo(() => {

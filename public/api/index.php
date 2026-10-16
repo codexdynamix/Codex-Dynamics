@@ -379,6 +379,19 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $rawInput = file_get_contents('php://input');
 $body = json_decode($rawInput, true) ?: [];
 
+function collectProjectCategories(array $savedCategories, array $projects): array {
+    $categories = [];
+    foreach ([$savedCategories, $projects] as $records) {
+        foreach ($records as $record) {
+            $name = trim((string)($record['name'] ?? $record['category'] ?? ''));
+            if ($name === '') continue;
+            $key = strtolower($name);
+            $categories[$key] = $name;
+        }
+    }
+    return array_values($categories);
+}
+
 // Health check
 if ($path === '/healthz') {
     jsonOut([
@@ -397,10 +410,12 @@ if ($path === '/public/content' || $path === '/content') {
     $projects = MongoService::getCollection('projects');
     $blogs = MongoService::getCollection('blogs');
     $reviews = MongoService::getCollection('reviews');
+    $categories = collectProjectCategories(MongoService::getCollection('project_categories'), $projects);
     jsonOut([
         'ok' => true,
         'storage' => 'mongodb',
         'projects' => $projects,
+        'categories' => $categories,
         'blogs' => $blogs,
         'reviews' => $reviews,
         'backlinks' => [],
@@ -795,9 +810,11 @@ if ($path === '/crm/action' && $method === 'POST' && ($body['action'] ?? '') ===
 }
 
 if ($path === '/admin/site-content' && $method === 'GET') {
+    $projects = MongoService::getCollection('projects');
     jsonOut([
         'ok' => true,
-        'projects' => MongoService::getCollection('projects'),
+        'projects' => $projects,
+        'categories' => collectProjectCategories(MongoService::getCollection('project_categories'), $projects),
         'blogs' => MongoService::getCollection('blogs'),
         'reviews' => MongoService::getCollection('reviews'),
         'settings' => MongoService::findOne('platform_settings', []) ?: [],
@@ -806,6 +823,28 @@ if ($path === '/admin/site-content' && $method === 'GET') {
 
 if ($path === '/admin/site-content/action' && $method === 'POST') {
     $type = $body['type'] ?? 'project';
+    if ($type === 'project_category') {
+        if (!in_array($body['action'] ?? '', ['create', 'add'], true)) {
+            jsonOut(['ok' => false, 'error' => 'Only project category creation is supported.'], 400);
+        }
+        $item = is_array($body['item'] ?? null) ? $body['item'] : [];
+        $name = trim((string)($item['name'] ?? ''));
+        $nameLength = preg_match_all('/./us', $name);
+        if ($name === '' || $nameLength === false || $nameLength > 60) {
+            jsonOut(['ok' => false, 'error' => 'Category names must be between 1 and 60 characters.'], 422);
+        }
+        $knownCategories = collectProjectCategories(
+            MongoService::getCollection('project_categories'),
+            MongoService::getCollection('projects')
+        );
+        foreach ($knownCategories as $knownCategory) {
+            if (strcasecmp($knownCategory, $name) === 0) {
+                jsonOut(['ok' => false, 'error' => 'That project category already exists.'], 409);
+            }
+        }
+        $category = MongoService::insert('project_categories', ['name' => $name]);
+        jsonOut(['ok' => true, 'category' => $category]);
+    }
     $col = $type === 'blog' ? 'blogs' : ($type === 'review' ? 'reviews' : 'projects');
     $action = $body['action'] ?? '';
     $item = $body['item'] ?? [];
