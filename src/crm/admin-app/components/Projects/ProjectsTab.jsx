@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import './ProjectsTab.css';
 import { getAdminSiteContent, runAdminSiteContentAction, uploadAdminSiteImage } from '../../adminApi.js';
 import {
@@ -44,6 +44,22 @@ const CATEGORIES = [
   'Custom Software',
 ];
 
+const normalizeProject = (project) => ({
+  ...project,
+  id: project.id,
+  client: project.client || project.site_name || '',
+  category: project.category || 'Websites & Web Apps',
+  image: project.image || project.image_url || '',
+  shortDescription: project.shortDescription || project.description || '',
+  detailedDescription: project.detailedDescription || project.description || '',
+  techStack: Array.isArray(project.techStack) ? project.techStack : [],
+  metrics: Array.isArray(project.metrics) ? project.metrics : [],
+  features: Array.isArray(project.features) ? project.features : [],
+  lighthouse: project.lighthouse || {},
+  published: project.published !== false && project.is_published !== false,
+  featured: Boolean(project.featured),
+});
+
 export default function ProjectsTab({ showNotification = () => {} }) {
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -51,40 +67,6 @@ export default function ProjectsTab({ showNotification = () => {} }) {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [confirmDialog, confirm] = useConfirmDialog();
-
-  useEffect(() => {
-    let active = true;
-    const normalize = (project) => ({
-      ...project,
-      id: project.id,
-      client: project.client || project.site_name || '',
-      category: project.category || 'Websites & Web Apps',
-      image: project.image || project.image_url || '',
-      shortDescription: project.shortDescription || project.description || '',
-      detailedDescription: project.detailedDescription || project.description || '',
-      techStack: Array.isArray(project.techStack) ? project.techStack : [],
-      metrics: Array.isArray(project.metrics) ? project.metrics : [],
-      features: Array.isArray(project.features) ? project.features : [],
-      lighthouse: project.lighthouse || {},
-      published: project.published !== false && project.is_published !== false,
-      featured: Boolean(project.featured),
-    });
-    const load = async () => {
-      setIsLoading(true);
-      setLoadError('');
-      try {
-        const content = await getAdminSiteContent();
-        if (active) setProjects((content.projects || []).map(normalize));
-      } catch (error) {
-        if (active) setLoadError(error.message || 'Portfolio projects could not be loaded.');
-      } finally {
-        if (active) setIsLoading(false);
-      }
-    };
-    load();
-    return () => { active = false; };
-  }, []);
-
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'published' | 'draft' | 'featured'
@@ -94,6 +76,45 @@ export default function ProjectsTab({ showNotification = () => {} }) {
   const [editingProject, setEditingProject] = useState(null);
   const [previewModalProject, setPreviewModalProject] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const interactionInProgressRef = useRef(false);
+  const refreshInProgressRef = useRef(false);
+  interactionInProgressRef.current = isSaving || isUploadingImage || isModalOpen;
+
+  const refreshProjects = useCallback(async ({ force = false, showLoading = false } = {}) => {
+    if (refreshInProgressRef.current || (!force && interactionInProgressRef.current)) {
+      return { ok: false, skipped: true };
+    }
+    refreshInProgressRef.current = true;
+    if (showLoading) setIsLoading(true);
+    setLoadError('');
+    try {
+      const content = await getAdminSiteContent();
+      setProjects((content.projects || []).map(normalizeProject));
+      return { ok: true };
+    } catch (error) {
+      const message = error.message || 'Portfolio projects could not be loaded.';
+      setLoadError(message);
+      return { ok: false, error };
+    } finally {
+      refreshInProgressRef.current = false;
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshProjects({ force: true, showLoading: true });
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshProjects();
+    };
+    const refreshInterval = window.setInterval(refreshWhenVisible, 30000);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(refreshInterval);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [refreshProjects]);
 
   // Form State for Create / Edit
   const [formData, setFormData] = useState({
@@ -173,17 +194,8 @@ export default function ProjectsTab({ showNotification = () => {} }) {
   const handleSyncToSite = async () => {
     setIsSyncing(true);
     try {
-      const content = await getAdminSiteContent();
-      const current = (content.projects || []).map((project) => ({
-        ...project,
-        client: project.client || project.site_name || '',
-        image: project.image || project.image_url || '',
-        shortDescription: project.shortDescription || project.description || '',
-        detailedDescription: project.detailedDescription || project.description || '',
-        published: project.published !== false && project.is_published !== false,
-        featured: Boolean(project.featured),
-      }));
-      setProjects(current);
+      const result = await refreshProjects({ force: true });
+      if (!result.ok) throw result.error || new Error('Portfolio refresh is already in progress.');
       showNotification('Portfolio refreshed from the shared database.');
     } catch (error) {
       showNotification(error.message || 'Portfolio refresh failed.');

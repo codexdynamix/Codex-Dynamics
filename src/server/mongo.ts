@@ -1,6 +1,5 @@
 import { MongoClient, Db } from 'mongodb';
 import {
-  SEED_PROJECTS,
   SEED_BLOGS,
   SEED_REVIEWS,
   SEED_STAFF,
@@ -84,7 +83,6 @@ export async function initMongo(): Promise<void> {
     await client.connect();
     const db = client.db(dbName);
     const collectionsToCheck = [
-      ['projects', SEED_PROJECTS],
       ['blogs', SEED_BLOGS],
       ['reviews', SEED_REVIEWS],
       ['staff_users', SEED_STAFF],
