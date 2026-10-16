@@ -1323,9 +1323,14 @@ apiRouter.post('/portal/logout', (_req: Request, res: Response) => {
 });
 
 apiRouter.get('/portal/data', async (req: Request, res: Response) => {
-  const clientId = String(req.query.client_id || '');
+  const portalClient = await portalTicketClient(req, res);
+  if (!portalClient) return;
+  const clientId = String(portalClient.id);
+  if (String(req.query.client_id || '') !== clientId) {
+    return res.status(403).json({ ok: false, error: 'You do not have permission to load this client data.' });
+  }
   const [client, projects, tickets, notifs, msgs] = await Promise.all([
-    clientId ? getMongoCollection('clients').findOne({ id: clientId }) : null,
+    Promise.resolve(portalClient),
     clientId ? getMongoCollection('client_projects').find({
       $and: [
         { $or: [{ client_id: clientId }, { clientId }] },
@@ -1338,7 +1343,7 @@ apiRouter.get('/portal/data', async (req: Request, res: Response) => {
         },
       ],
     }) : [],
-    getMongoCollection('client_support_tickets').find({ clientId }),
+    clientId ? getMongoCollection('client_support_tickets').find({ clientId }) : [],
     getMongoCollection('notifications').find(),
     getMongoCollection('messages').find(),
   ]);
@@ -1388,14 +1393,93 @@ apiRouter.post('/portal/profile', async (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
+async function portalTicketClient(req: Request, res: Response) {
+  const authorization = String(req.headers.authorization || '');
+  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
+  const match = token.match(/^cdx_portal_(?:mongo|impersonate)_(.+)_(\d{13})$/);
+  if (!match) {
+    res.status(401).json({ ok: false, error: 'Your portal session is invalid. Sign in again.' });
+    return null;
+  }
+  const issuedAt = Number(match[2]);
+  if (!Number.isFinite(issuedAt) || issuedAt > Date.now() + 60_000 || Date.now() - issuedAt > 12 * 60 * 60 * 1000) {
+    res.status(401).json({ ok: false, error: 'Your portal session has expired. Sign in again.' });
+    return null;
+  }
+  const client = await getMongoCollection('clients').findOne({ id: match[1] });
+  if (!client || client.status === 'Suspended' || client.deleted_at || client.is_bin === true) {
+    res.status(401).json({ ok: false, error: 'The client portal account is unavailable.' });
+    return null;
+  }
+  if (client.portalEnabled === false || client.portal_enabled === 0 || client.portal_enabled === false) {
+    res.status(403).json({ ok: false, error: 'The client portal is disabled for this account.' });
+    return null;
+  }
+  return client;
+}
+
 apiRouter.all('/portal/ticket', async (req: Request, res: Response) => {
   const ticketCol = getMongoCollection('client_support_tickets');
+  const client = await portalTicketClient(req, res);
+  if (!client) return;
+  const clientId = String(client.id);
   if (req.method === 'POST') {
-    const t = { ...req.body, id: `ticket_${Date.now()}`, status: 'Open', created_at: new Date().toISOString() };
-    await ticketCol.insertOne(t);
-    return res.json({ ok: true, ticket: t });
+    const body = req.body || {};
+    if (body.ticketId) {
+      const text = String(body.text || '').trim();
+      if (!text || text.length > 5000) {
+        return res.status(422).json({ ok: false, error: 'Reply must be between 1 and 5000 characters.' });
+      }
+      const ticket = await ticketCol.findOne({ id: String(body.ticketId), clientId });
+      if (!ticket) return res.status(404).json({ ok: false, error: 'Support request not found.' });
+      const messages = Array.isArray(ticket.messages) ? ticket.messages : [];
+      messages.push({
+        id: `message_${randomUUID()}`,
+        sender: 'client',
+        senderName: String(client.name || client.company || 'Client'),
+        text,
+        created_at: new Date().toISOString(),
+      });
+      await ticketCol.updateOne({ id: ticket.id, clientId }, {
+        $set: { messages, status: 'Open', updated_at: new Date().toISOString() },
+      });
+      return res.json({ ok: true, messages });
+    }
+    const subject = String(body.subject || '').trim();
+    const message = String(body.message || '').trim();
+    const categories = ['Website & Code', 'Hosting & Server', 'Billing & Invoicing', 'Design & UX', 'General Question', 'Custom Feature'];
+    const priorities = ['Low', 'Medium', 'High', 'Urgent'];
+    if (!subject || subject.length > 180 || !message || message.length > 5000) {
+      return res.status(422).json({ ok: false, error: 'Subject (1–180 characters) and message (1–5000 characters) are required.' });
+    }
+    if (!categories.includes(body.category) || !priorities.includes(body.priority)) {
+      return res.status(422).json({ ok: false, error: 'Choose a valid support category and priority.' });
+    }
+    const createdAt = new Date().toISOString();
+    const ticket = {
+      id: `ticket_${randomUUID()}`,
+      clientId,
+      ticketNumber: `CDX-${new Date().toISOString().slice(2, 10).replaceAll('-', '')}-${randomUUID().slice(0, 6).toUpperCase()}`,
+      subject,
+      category: body.category,
+      priority: body.priority,
+      status: 'Open',
+      assignedStaff: 'Codex Dynamics Support',
+      created_at: createdAt,
+      updated_at: createdAt,
+      messages: [{
+        id: `message_${randomUUID()}`,
+        sender: 'client',
+        senderName: String(client.name || client.company || 'Client'),
+        text: message,
+        created_at: createdAt,
+      }],
+    };
+    await ticketCol.insertOne(ticket);
+    return res.json({ ok: true, ticket });
   }
-  const tickets = await ticketCol.find();
+  if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed.' });
+  const tickets = await ticketCol.find({ clientId }, { sort: { created_at: -1 }, limit: 500 });
   res.json({ ok: true, tickets });
 });
 

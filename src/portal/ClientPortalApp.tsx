@@ -98,9 +98,10 @@ export function ClientPortalApp() {
   }, []);
 
   const navigate = (path: string) => {
-    setCurrentPath(path);
+    const target = new URL(path, window.location.origin);
+    setCurrentPath(target.pathname);
     if (typeof window !== 'undefined') {
-      window.history.pushState({}, '', path);
+      window.history.pushState({}, '', `${target.pathname}${target.search}${target.hash}`);
     }
   };
 
@@ -146,7 +147,13 @@ export function ClientPortalApp() {
       return <PortalFiles client={client} onNavigate={navigate} />;
     }
     if (currentPath === '/portal/support') {
-      return <PortalSupport client={client} onNavigate={navigate} />;
+      return (
+        <PortalSupport
+          client={client}
+          onNavigate={navigate}
+          requestFeature={new URLSearchParams(window.location.search).get('request') === 'feature'}
+        />
+      );
     }
     if (currentPath === '/portal/notifications') {
       return <PortalNotifications client={client} onNavigate={navigate} />;

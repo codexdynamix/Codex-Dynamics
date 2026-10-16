@@ -1017,8 +1017,11 @@ if ($path === '/portal/login' && $method === 'POST') {
 }
 
 if (str_starts_with($path, '/portal/data')) {
-    $clientId = $_GET['client_id'] ?? '';
-    $client = MongoService::findOne('clients', ['id' => $clientId]);
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    if ((string)($_GET['client_id'] ?? '') !== $clientId) {
+        jsonOut(['ok' => false, 'error' => 'You do not have permission to load this client data.'], 403);
+    }
     $projects = $clientId !== '' ? MongoService::getCollection('client_projects', [
         '$and' => [
             ['$or' => [
@@ -1049,7 +1052,7 @@ if (str_starts_with($path, '/portal/data')) {
         'payments' => [],
         'hosting' => [],
         'domains' => [],
-        'tickets' => [],
+        'tickets' => MongoService::getCollection('client_support_tickets', ['clientId' => $clientId], 500, 0, ['created_at' => -1]),
         'files' => [],
         'notifications' => [],
     ]);
@@ -1089,6 +1092,80 @@ if ($path === '/portal/logout' && $method === 'POST') {
         'samesite' => 'Lax',
     ]);
     jsonOut(['ok' => true]);
+}
+
+if ($path === '/portal/ticket') {
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    if ($method === 'GET') {
+        jsonOut([
+            'ok' => true,
+            'tickets' => MongoService::getCollection('client_support_tickets', ['clientId' => $clientId], 500, 0, ['created_at' => -1]),
+        ]);
+    }
+    if ($method !== 'POST') {
+        jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    }
+
+    if (isset($body['ticketId'])) {
+        $text = trim((string)($body['text'] ?? ''));
+        if ($text === '' || strlen($text) > 5000) {
+            jsonOut(['ok' => false, 'error' => 'Reply must be between 1 and 5000 characters.'], 422);
+        }
+        $ticketId = trim((string)$body['ticketId']);
+        $ticket = MongoService::findOne('client_support_tickets', ['id' => $ticketId, 'clientId' => $clientId]);
+        if (!$ticket) {
+            jsonOut(['ok' => false, 'error' => 'Support request not found.'], 404);
+        }
+        $messages = is_array($ticket['messages'] ?? null) ? $ticket['messages'] : [];
+        $messages[] = [
+            'id' => 'message_' . bin2hex(random_bytes(12)),
+            'sender' => 'client',
+            'senderName' => (string)($client['name'] ?? $client['company'] ?? 'Client'),
+            'text' => $text,
+            'created_at' => date('c'),
+        ];
+        $updatedAt = date('c');
+        MongoService::updateOne('client_support_tickets', ['id' => $ticketId, 'clientId' => $clientId], [
+            'messages' => $messages,
+            'status' => 'Open',
+            'updated_at' => $updatedAt,
+        ]);
+        jsonOut(['ok' => true, 'messages' => $messages]);
+    }
+
+    $subject = trim((string)($body['subject'] ?? ''));
+    $message = trim((string)($body['message'] ?? ''));
+    $category = (string)($body['category'] ?? '');
+    $priority = (string)($body['priority'] ?? '');
+    $allowedCategories = ['Website & Code', 'Hosting & Server', 'Billing & Invoicing', 'Design & UX', 'General Question', 'Custom Feature'];
+    $allowedPriorities = ['Low', 'Medium', 'High', 'Urgent'];
+    if ($subject === '' || strlen($subject) > 180 || strlen($message) > 5000) {
+        jsonOut(['ok' => false, 'error' => 'Subject (1–180 characters) and message (1–5000 characters) are required.'], 422);
+    }
+    if (!in_array($category, $allowedCategories, true) || !in_array($priority, $allowedPriorities, true)) {
+        jsonOut(['ok' => false, 'error' => 'Choose a valid support category and priority.'], 422);
+    }
+
+    $createdAt = date('c');
+    $ticket = MongoService::insert('client_support_tickets', [
+        'clientId' => $clientId,
+        'ticketNumber' => 'CDX-' . date('ymd') . '-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 6)),
+        'subject' => $subject,
+        'category' => $category,
+        'priority' => $priority,
+        'status' => 'Open',
+        'assignedStaff' => 'Codex Dynamics Support',
+        'updated_at' => $createdAt,
+        'messages' => [[
+            'id' => 'message_' . bin2hex(random_bytes(12)),
+            'sender' => 'client',
+            'senderName' => (string)($client['name'] ?? $client['company'] ?? 'Client'),
+            'text' => $message,
+            'created_at' => $createdAt,
+        ]],
+    ]);
+    jsonOut(['ok' => true, 'ticket' => $ticket], 201);
 }
 
 if (str_contains($path, '/portal-password')) {

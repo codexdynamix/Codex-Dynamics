@@ -197,7 +197,7 @@ export interface ClientSupportTicket {
   clientId: string;
   ticketNumber: string;
   subject: string;
-  category: 'Website & Code' | 'Hosting & Server' | 'Billing & Invoicing' | 'Design & UX' | 'General Question';
+  category: 'Website & Code' | 'Hosting & Server' | 'Billing & Invoicing' | 'Design & UX' | 'General Question' | 'Custom Feature';
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   status: 'Open' | 'In Progress' | 'Waiting for Client' | 'Resolved' | 'Closed';
   assignedStaff: string;

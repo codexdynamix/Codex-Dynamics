@@ -25,6 +25,7 @@ import { SearchAutocomplete } from '../../components/SearchAutocomplete.jsx';
 interface PortalSupportProps {
   client: PortalClient;
   onNavigate: (path: string) => void;
+  requestFeature?: boolean;
 }
 
 function ClientDirectChat({ client }: { client: PortalClient }) {
@@ -181,8 +182,8 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
   </section>;
 }
 
-export function PortalSupport({ client }: PortalSupportProps) {
-  const [activeChannel, setActiveChannel] = useState<'chat' | 'tickets'>('chat');
+export function PortalSupport({ client, requestFeature = false }: PortalSupportProps) {
+  const [activeChannel, setActiveChannel] = useState<'chat' | 'tickets'>(requestFeature ? 'tickets' : 'chat');
   const [tickets, setTickets] = useState<ClientSupportTicket[]>(() => portalDb.getSupportTickets(client.id));
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(tickets[0]?.id || null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -199,6 +200,14 @@ export function PortalSupport({ client }: PortalSupportProps) {
   const [message, setMessage] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!requestFeature) return;
+    setCategory('Custom Feature');
+    setSubject((current) => current || 'Custom feature request');
+    setMessage('');
+    setCreateModalOpen(true);
+  }, [requestFeature]);
 
   const selectedTicket = tickets.find((t) => t.id === selectedTicketId) || tickets[0] || null;
 
@@ -541,10 +550,10 @@ export function PortalSupport({ client }: PortalSupportProps) {
             <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.08]">
               <div>
                 <h3 className="text-base font-semibold text-[#1D1D1F] dark:text-white">
-                  New Support Request
+                  {category === 'Custom Feature' ? 'Request a Custom Feature' : 'New Support Request'}
                 </h3>
                 <p className="text-xs text-[#86868B]">
-                  Direct communication thread
+                  {category === 'Custom Feature' ? 'Describe the feature you would like our team to build.' : 'Direct communication thread'}
                 </p>
               </div>
               <button
@@ -581,6 +590,7 @@ export function PortalSupport({ client }: PortalSupportProps) {
                     className="w-full bg-[#F5F5F7] dark:bg-[#252528] border border-black/[0.06] dark:border-white/[0.08] rounded-xl px-3 py-2 text-xs text-[#1D1D1F] dark:text-white focus:outline-none focus:ring-1 focus:ring-[#0071E3]"
                   >
                     <option value="Website & Code">Website &amp; Code</option>
+                    <option value="Custom Feature">Custom Feature</option>
                     <option value="Hosting & Server">Hosting &amp; Server</option>
                     <option value="Billing & Invoicing">Billing &amp; Invoicing</option>
                     <option value="Design & UX">Design &amp; UX</option>
@@ -614,7 +624,9 @@ export function PortalSupport({ client }: PortalSupportProps) {
                   rows={4}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Describe your request..."
+                  placeholder={category === 'Custom Feature'
+                    ? 'Describe the feature, the problem it solves, and any important requirements...'
+                    : 'Describe your request...'}
                   className="w-full bg-[#F5F5F7] dark:bg-[#252528] border border-black/[0.06] dark:border-white/[0.08] rounded-xl p-3 text-xs text-[#1D1D1F] dark:text-white focus:outline-none focus:ring-1 focus:ring-[#0071E3] resize-none"
                 />
               </div>

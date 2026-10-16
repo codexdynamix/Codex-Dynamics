@@ -82,7 +82,8 @@ export function PortalProjects({ client, onNavigate }: PortalProjectsProps) {
         </div>
 
         <button
-          onClick={() => onNavigate('/portal/support')}
+          onClick={() => onNavigate('/portal/support?request=feature')}
+          data-testid="button-request-custom-feature"
           className="px-4 py-2 rounded-2xl bg-black/[0.04] dark:bg-white/[0.08] hover:bg-black/[0.07] dark:hover:bg-white/[0.12] text-[#1D1D1F] dark:text-[#F5F5F7] text-xs font-semibold border border-black/[0.04] dark:border-white/[0.06] transition-all flex items-center gap-1.5 self-start sm:self-auto"
         >
           <span>Request Custom Feature</span>
