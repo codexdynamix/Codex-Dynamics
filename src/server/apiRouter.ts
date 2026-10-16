@@ -727,6 +727,47 @@ apiRouter.get('/admin/pending-counts', async (_req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 // 5. CLIENT PROJECTS & REVIEWS
 // ---------------------------------------------------------------------------
+apiRouter.get('/admin/support-tickets', async (req: Request, res: Response) => {
+  const clientId = String(req.query.client_id || '').trim();
+  const tickets = await getMongoCollection('client_support_tickets').find(
+    clientId ? { clientId } : {},
+    { sort: { created_at: -1 }, limit: 1000 }
+  );
+  const clientIds = [...new Set(tickets.map((ticket) => String(ticket.clientId || '')).filter(Boolean))];
+  const clients = await Promise.all(clientIds.map((id) => getMongoCollection('clients').findOne({ id })));
+  const clientById = new Map(clients.filter(Boolean).map((client) => [String(client!.id), client]));
+  res.json({
+    ok: true,
+    tickets: tickets.map((ticket) => ({
+      ...ticket,
+      clientName: clientById.get(String(ticket.clientId))?.name || clientById.get(String(ticket.clientId))?.company || 'Client',
+      clientEmail: clientById.get(String(ticket.clientId))?.email || '',
+    })),
+  });
+});
+
+apiRouter.post('/admin/support-tickets/:id/reply', async (req: Request, res: Response) => {
+  const text = String(req.body?.text || '').trim();
+  const senderName = String(req.body?.senderName || 'Codex Dynamics Support').trim().slice(0, 120);
+  if (!text || text.length > 5000) {
+    return res.status(422).json({ ok: false, error: 'Reply must be between 1 and 5000 characters.' });
+  }
+  const ticketCol = getMongoCollection('client_support_tickets');
+  const ticket = await ticketCol.findOne({ id: req.params.id });
+  if (!ticket) return res.status(404).json({ ok: false, error: 'Support request not found.' });
+  const messages = Array.isArray(ticket.messages) ? ticket.messages : [];
+  messages.push({
+    id: `message_${randomUUID()}`,
+    sender: 'staff',
+    senderName: senderName || 'Codex Dynamics Support',
+    text,
+    created_at: new Date().toISOString(),
+  });
+  const updatedAt = new Date().toISOString();
+  await ticketCol.updateOne({ id: ticket.id }, { $set: { messages, status: 'In Progress', updated_at: updatedAt } });
+  return res.json({ ok: true, ticket: { ...ticket, messages, status: 'In Progress', updated_at: updatedAt } });
+});
+
 apiRouter.get('/admin/client-projects', async (_req: Request, res: Response) => {
   const projects = await getMongoCollection('client_projects').find({
     $or: [

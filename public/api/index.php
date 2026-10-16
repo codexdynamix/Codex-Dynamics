@@ -764,6 +764,63 @@ if (preg_match('#^/admin/clients/([^/]+)(?:/(restore))?$#', $path, $matches)) {
     jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
 }
 
+if ($path === '/admin/support-tickets' && $method === 'GET') {
+    $clientId = trim((string)($_GET['client_id'] ?? ''));
+    $tickets = MongoService::getCollection(
+        'client_support_tickets',
+        $clientId !== '' ? ['clientId' => $clientId] : [],
+        1000,
+        0,
+        ['created_at' => -1]
+    );
+    $clients = [];
+    foreach ($tickets as $ticket) {
+        $id = (string)($ticket['clientId'] ?? '');
+        if ($id !== '' && !isset($clients[$id])) {
+            $clients[$id] = MongoService::findOne('clients', ['id' => $id]) ?? [];
+        }
+    }
+    foreach ($tickets as &$ticket) {
+        $client = $clients[(string)($ticket['clientId'] ?? '')] ?? [];
+        $ticket['clientName'] = (string)($client['name'] ?? $client['company'] ?? 'Client');
+        $ticket['clientEmail'] = (string)($client['email'] ?? '');
+    }
+    unset($ticket);
+    jsonOut(['ok' => true, 'tickets' => $tickets]);
+}
+
+if (preg_match('#^/admin/support-tickets/([^/]+)/reply$#', $path, $matches) && $method === 'POST') {
+    $ticketId = rawurldecode($matches[1]);
+    $text = trim((string)($body['text'] ?? ''));
+    $senderName = trim(substr((string)($body['senderName'] ?? 'Codex Dynamics Support'), 0, 120));
+    if ($text === '' || strlen($text) > 5000) {
+        jsonOut(['ok' => false, 'error' => 'Reply must be between 1 and 5000 characters.'], 422);
+    }
+    $ticket = MongoService::findOne('client_support_tickets', ['id' => $ticketId]);
+    if (!$ticket) {
+        jsonOut(['ok' => false, 'error' => 'Support request not found.'], 404);
+    }
+    $messages = is_array($ticket['messages'] ?? null) ? $ticket['messages'] : [];
+    $messages[] = [
+        'id' => 'message_' . bin2hex(random_bytes(12)),
+        'sender' => 'staff',
+        'senderName' => $senderName !== '' ? $senderName : 'Codex Dynamics Support',
+        'text' => $text,
+        'created_at' => date('c'),
+    ];
+    $updatedAt = date('c');
+    MongoService::updateOne('client_support_tickets', ['id' => $ticketId], [
+        'messages' => $messages,
+        'status' => 'In Progress',
+        'updated_at' => $updatedAt,
+    ]);
+    jsonOut(['ok' => true, 'ticket' => array_merge($ticket, [
+        'messages' => $messages,
+        'status' => 'In Progress',
+        'updated_at' => $updatedAt,
+    ])]);
+}
+
 if (preg_match('#^/admin/client-projects(?:/([^/]+))?$#', $path, $matches)) {
     $projectId = isset($matches[1]) ? rawurldecode($matches[1]) : '';
     $collection = 'client_projects';

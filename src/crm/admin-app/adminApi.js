@@ -1408,6 +1408,19 @@ export async function startClientPortalImpersonation(clientId) {
   });
 }
 
+export async function getClientSupportTickets(clientId) {
+  const query = clientId ? `?client_id=${encodeURIComponent(clientId)}` : '';
+  const result = await adminFetch(`/api/admin/support-tickets${query}`);
+  return Array.isArray(result.tickets) ? result.tickets : [];
+}
+
+export async function replyToClientSupportTicket(ticketId, text, senderName) {
+  return adminFetch(`/api/admin/support-tickets/${encodeURIComponent(ticketId)}/reply`, {
+    method: 'POST',
+    body: { text, senderName },
+  });
+}
+
 export async function getUserProfileHistoryApi(userId, { limit = 50, offset = 0 } = {}) {
   if (!userId) {
     const err = new Error('userId is required'); err.code = 'bad_request'; throw err;

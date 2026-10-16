@@ -18,6 +18,8 @@ import {
   getAdminMessages,
   sendAdminMessage,
   markAdminMessagesRead,
+  getClientSupportTickets,
+  replyToClientSupportTicket,
 } from '../adminApi.js';
 import { useConfirmDialog } from './ConfirmModal/ConfirmModal.jsx';
 import { ClientEmailAccounts, CommunicationActionModal } from './HostingerMailAdmin.jsx';
@@ -76,6 +78,11 @@ export default function ClientProfileModal({
   const [chatInputText, setChatInputText] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const chatMessagesEndRef = useRef(null);
+  const [supportTickets, setSupportTickets] = useState([]);
+  const [supportTicketsLoading, setSupportTicketsLoading] = useState(false);
+  const [supportTicketsError, setSupportTicketsError] = useState('');
+  const [ticketReplyDrafts, setTicketReplyDrafts] = useState({});
+  const [ticketReplyingId, setTicketReplyingId] = useState('');
 
   // Client Activity state
   const [clientActivityData, setClientActivityData] = useState({ logs: [], stats: { pageViews: 0, sessions: 0, lastLogin: '' } });
@@ -101,6 +108,13 @@ export default function ClientProfileModal({
     setLiveClientPassword('');
     setClientActivityData(portalDb.getClientActivity(client.id));
     setChatMessages([]);
+    setSupportTickets([]);
+    setSupportTicketsError('');
+    setSupportTicketsLoading(true);
+    getClientSupportTickets(client.id)
+      .then(setSupportTickets)
+      .catch((error) => setSupportTicketsError(error?.message || 'Could not load support requests.'))
+      .finally(() => setSupportTicketsLoading(false));
 
     getAdminMessages(client.id, { limit: 200 })
       .then(async (res) => {
@@ -239,6 +253,27 @@ export default function ClientProfileModal({
       showNotification(error?.message || 'Could not send the client message.');
     } finally {
       setChatSending(false);
+    }
+  };
+
+  const handleReplyToSupportTicket = async (ticket) => {
+    const text = String(ticketReplyDrafts[ticket.id] || '').trim();
+    if (!text || ticketReplyingId) return;
+    setTicketReplyingId(ticket.id);
+    setSupportTicketsError('');
+    try {
+      const result = await replyToClientSupportTicket(
+        ticket.id,
+        text,
+        currentUser?.name || currentUser?.fullName || 'Codex Dynamics Support'
+      );
+      setSupportTickets((tickets) => tickets.map((item) => item.id === ticket.id ? result.ticket : item));
+      setTicketReplyDrafts((drafts) => ({ ...drafts, [ticket.id]: '' }));
+      showNotification('Reply sent to the client portal.');
+    } catch (error) {
+      setSupportTicketsError(error?.message || 'Could not send the support reply.');
+    } finally {
+      setTicketReplyingId('');
     }
   };
 
@@ -734,6 +769,62 @@ export default function ClientProfileModal({
           {/* TAB 2: CLIENT SUPPORT CHAT */}
           {profileViewTab === 'chat' && (
             <div className="crm-inline-c1514e7501">
+              <section style={{ marginBottom: 24, padding: 18, border: '1px solid var(--crm-border, rgba(255,255,255,.1))', borderRadius: 14, background: 'var(--crm-card, rgba(255,255,255,.03))' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                  <div>
+                    <h3 className="crm-inline-ea6402deab">Support Tickets</h3>
+                    <p className="crm-inline-a172100265">Client-submitted portal requests and replies. Responses here appear in that ticket in the client portal.</p>
+                  </div>
+                  <button type="button" onClick={() => {
+                    setSupportTicketsLoading(true);
+                    getClientSupportTickets(client.id)
+                      .then(setSupportTickets)
+                      .catch((error) => setSupportTicketsError(error?.message || 'Could not refresh support requests.'))
+                      .finally(() => setSupportTicketsLoading(false));
+                  }} className="crm-inline-64c753f0c8">Refresh</button>
+                </div>
+                {supportTicketsError && <div role="alert" style={{ marginBottom: 12, color: '#ff6961' }}>{supportTicketsError}</div>}
+                {supportTicketsLoading ? (
+                  <p className="crm-inline-a172100265">Loading support tickets…</p>
+                ) : supportTickets.length === 0 ? (
+                  <p className="crm-inline-a172100265">No portal support tickets have been submitted by this client.</p>
+                ) : (
+                  <div style={{ display: 'grid', gap: 14 }}>
+                    {supportTickets.map((ticket) => (
+                      <article key={ticket.id} style={{ padding: 14, borderRadius: 12, border: '1px solid var(--crm-border, rgba(255,255,255,.1))' }} data-testid={`crm-support-ticket-${ticket.id}`}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+                          <div>
+                            <strong>{ticket.subject}</strong>
+                            <div className="crm-inline-a172100265">{ticket.ticketNumber} · {ticket.category} · {ticket.priority}</div>
+                          </div>
+                          <span>{ticket.status}</span>
+                        </div>
+                        <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+                          {(ticket.messages || []).map((message) => (
+                            <div key={message.id} style={{ padding: 10, borderRadius: 10, background: message.sender === 'staff' || message.sender === 'agent' ? 'rgba(0,113,227,.12)' : 'rgba(255,255,255,.04)' }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{message.senderName || (message.sender === 'staff' ? 'Support' : client.name)}</div>
+                              <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <form onSubmit={(event) => { event.preventDefault(); void handleReplyToSupportTicket(ticket); }} style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            aria-label={`Reply to ${ticket.ticketNumber}`}
+                            value={ticketReplyDrafts[ticket.id] || ''}
+                            onChange={(event) => setTicketReplyDrafts((drafts) => ({ ...drafts, [ticket.id]: event.target.value }))}
+                            maxLength={5000}
+                            placeholder="Write a reply to this portal ticket..."
+                            style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--crm-border, rgba(255,255,255,.15))', background: 'var(--crm-input, rgba(0,0,0,.15))', color: 'inherit' }}
+                          />
+                          <button type="submit" disabled={ticketReplyingId === ticket.id || !String(ticketReplyDrafts[ticket.id] || '').trim()} className="crm-inline-ff72acff12">
+                            {ticketReplyingId === ticket.id ? 'Sending…' : 'Reply'}
+                          </button>
+                        </form>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
               <div className="crm-inline-89f1352d55">
                 <div>
                   <h3 className="crm-inline-ea6402deab">
