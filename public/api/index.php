@@ -750,6 +750,50 @@ if (preg_match('#^/admin/clients/([^/]+)(?:/(restore))?$#', $path, $matches)) {
 }
 
 // 4. Content & Settings
+if ($path === '/crm/action' && $method === 'POST' && ($body['action'] ?? '') === 'upload_image') {
+    $data = trim((string)($body['data'] ?? ''));
+    if (!preg_match('#^data:(image/(?:jpeg|png|webp|gif|avif)|video/(?:mp4|webm));base64,([A-Za-z0-9+/]+=*)$#', $data, $match)) {
+        jsonOut(['ok' => false, 'error' => 'Choose a supported image or video file.'], 422);
+    }
+
+    $file = base64_decode($match[2], true);
+    if ($file === false || $file === '' || strlen($file) > 5 * 1024 * 1024) {
+        jsonOut(['ok' => false, 'error' => 'Media files must be 5MB or smaller.'], 413);
+    }
+
+    $mimeType = (new finfo(FILEINFO_MIME_TYPE))->buffer($file);
+    $extensionByMime = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        'image/gif' => 'gif',
+        'image/avif' => 'avif',
+        'video/mp4' => 'mp4',
+        'video/webm' => 'webm',
+    ];
+    if (!isset($extensionByMime[$mimeType])) {
+        jsonOut(['ok' => false, 'error' => 'The uploaded file type is not supported.'], 415);
+    }
+
+    $uploadDirectory = dirname(__DIR__) . '/uploads/projects';
+    if (!is_dir($uploadDirectory) && !mkdir($uploadDirectory, 0755, true) && !is_dir($uploadDirectory)) {
+        error_log('[Projects] Could not create the project media directory.');
+        jsonOut(['ok' => false, 'error' => 'Project media storage is unavailable.'], 500);
+    }
+
+    $filename = bin2hex(random_bytes(16)) . '.' . $extensionByMime[$mimeType];
+    if (file_put_contents($uploadDirectory . '/' . $filename, $file, LOCK_EX) === false) {
+        error_log('[Projects] Could not write an uploaded project media file.');
+        jsonOut(['ok' => false, 'error' => 'The project media file could not be saved.'], 500);
+    }
+
+    jsonOut([
+        'ok' => true,
+        'url' => '/uploads/projects/' . $filename,
+        'mediaType' => str_starts_with($mimeType, 'video/') ? 'video' : 'image',
+    ]);
+}
+
 if ($path === '/admin/site-content' && $method === 'GET') {
     jsonOut([
         'ok' => true,
@@ -770,6 +814,7 @@ if ($path === '/admin/site-content/action' && $method === 'POST') {
         if (!is_array($item) || $item === []) {
             jsonOut(['ok' => false, 'error' => 'A site-content item is required.'], 422);
         }
+        unset($item['_id']);
         $saved = MongoService::insert($col, $item);
         jsonOut(['ok' => true, 'item' => $saved]);
     }
@@ -779,6 +824,7 @@ if ($path === '/admin/site-content/action' && $method === 'POST') {
         if ($id === null || $id === '' || !is_array($item) || $item === []) {
             jsonOut(['ok' => false, 'error' => 'A site-content item id and item are required.'], 422);
         }
+        unset($item['_id']);
         if (MongoService::updateOne($col, ['id' => $id], $item) === 0) {
             jsonOut(['ok' => false, 'error' => 'The site-content item was not found.'], 404);
         }

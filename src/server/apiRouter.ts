@@ -1,4 +1,7 @@
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { getMongoCollection, isMongoConnected, getDatabaseName } from './mongo.ts';
 import { SEED_STAFF } from './seedData.ts';
 import { normalizeAdminRole } from '../crm/roleNormalization.js';
@@ -98,6 +101,37 @@ apiRouter.get('/content', handlePublicContent);
 apiRouter.post('/crm/action', async (req: Request, res: Response) => {
   try {
     const { action, payload } = req.body || {};
+    if (action === 'upload_image') {
+      const data = String(req.body?.data || '');
+      const match = data.match(/^data:(image\/(?:jpeg|png|webp|gif|avif)|video\/(?:mp4|webm));base64,([A-Za-z0-9+/]+=*)$/);
+      if (!match) {
+        return res.status(422).json({ ok: false, error: 'Choose a supported image or video file.' });
+      }
+      const mimeType = match[1];
+      const file = Buffer.from(match[2], 'base64');
+      if (file.length === 0 || file.length > 5 * 1024 * 1024) {
+        return res.status(413).json({ ok: false, error: 'Media files must be 5MB or smaller.' });
+      }
+      const extensionByMime: Record<string, string> = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'image/gif': 'gif',
+        'image/avif': 'avif',
+        'video/mp4': 'mp4',
+        'video/webm': 'webm',
+      };
+      const extension = extensionByMime[mimeType];
+      const directory = path.resolve(process.cwd(), 'public', 'uploads', 'projects');
+      await mkdir(directory, { recursive: true });
+      const filename = `${randomUUID()}.${extension}`;
+      await writeFile(path.join(directory, filename), file, { flag: 'wx' });
+      return res.json({
+        ok: true,
+        url: `/uploads/projects/${filename}`,
+        mediaType: mimeType.startsWith('video/') ? 'video' : 'image',
+      });
+    }
     if (action === 'subscribe_newsletter') {
       await getMongoCollection('newsletter_subscribers').insertOne({
         email: payload?.email,
@@ -700,38 +734,49 @@ apiRouter.get('/admin/site-content', async (_req: Request, res: Response) => {
 });
 
 apiRouter.post('/admin/site-content/action', async (req: Request, res: Response) => {
-  const { type, action, item, id } = req.body || {};
-  const colName = type === 'blog' ? 'blogs' : type === 'review' ? 'reviews' : 'projects';
-  const col = getMongoCollection(colName);
+  try {
+    const { type, action, item, id } = req.body || {};
+    const colName = type === 'blog' ? 'blogs' : type === 'review' ? 'reviews' : 'projects';
+    const col = getMongoCollection(colName);
 
-  if (action === 'create' || action === 'add') {
-    const newItem = { ...item, id: item?.id || Date.now() };
-    await col.insertOne(newItem);
-    return res.json({ ok: true, item: newItem });
+    if (action === 'create' || action === 'add') {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return res.status(400).json({ ok: false, error: 'A site-content item is required.' });
+      }
+      const { _id: _mongoId, ...record } = item;
+      const newItem = { ...record, id: record.id || Date.now() };
+      await col.insertOne(newItem);
+      return res.json({ ok: true, item: newItem });
+    }
+    if (action === 'update' || action === 'edit') {
+      const targetId = id || item?.id;
+      if (targetId === undefined || targetId === null || !item || typeof item !== 'object' || Array.isArray(item)) {
+        return res.status(400).json({ ok: false, error: 'A project id and item are required.' });
+      }
+      const { _id: _mongoId, ...record } = item;
+      const result = await col.updateOne({ $or: [{ id: targetId }, { _id: targetId }] }, { $set: record });
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ ok: false, error: 'The portfolio item was not found.' });
+      }
+      return res.json({ ok: true, item: record });
+    }
+    if (action === 'delete') {
+      const targetId = id || item?.id;
+      if (targetId === undefined || targetId === null || targetId === '') {
+        return res.status(400).json({ ok: false, error: 'A project id is required.' });
+      }
+      const result = await col.deleteOne({ $or: [{ id: targetId }, { _id: targetId }] });
+      if (result.deletedCount === 0) {
+        return res.status(404).json({ ok: false, error: 'The portfolio item was not found.' });
+      }
+      return res.json({ ok: true, deleted: result.deletedCount });
+    }
+    return res.status(400).json({ ok: false, error: 'Unsupported site-content action.' });
+  } catch (error) {
+    console.error('[site-content/action] MongoDB action failed:', error);
+    const message = error instanceof Error ? error.message : 'The site-content action failed.';
+    return res.status(500).json({ ok: false, error: message });
   }
-  if (action === 'update' || action === 'edit') {
-    const targetId = id || item?.id;
-    if (targetId === undefined || targetId === null || !item || typeof item !== 'object') {
-      return res.status(400).json({ ok: false, error: 'A project id and item are required.' });
-    }
-    const result = await col.updateOne({ $or: [{ id: targetId }, { _id: targetId }] }, { $set: item });
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ ok: false, error: 'The portfolio item was not found.' });
-    }
-    return res.json({ ok: true, item });
-  }
-  if (action === 'delete') {
-    const targetId = id || item?.id;
-    if (targetId === undefined || targetId === null || targetId === '') {
-      return res.status(400).json({ ok: false, error: 'A project id is required.' });
-    }
-    const result = await col.deleteOne({ $or: [{ id: targetId }, { _id: targetId }] });
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ ok: false, error: 'The portfolio item was not found.' });
-    }
-    return res.json({ ok: true, deleted: result.deletedCount });
-  }
-  return res.status(400).json({ ok: false, error: 'Unsupported site-content action.' });
 });
 
 apiRouter.all('/admin/blog/categories', async (req: Request, res: Response) => {

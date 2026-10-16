@@ -471,11 +471,24 @@ export function ProjectShowcaseGrid() {
                 <div>
                   {/* Card Media with Zoom and Hover Action */}
                   <div className="relative aspect-[16/10] overflow-hidden bg-muted">
-                    <ImageWithFallback
-                      src={project.image}
-                      alt={project.title}
-                      className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
-                    />
+                    {project.video ? (
+                      <video
+                        src={project.video}
+                        poster={project.image}
+                        className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        preload="metadata"
+                      />
+                    ) : (
+                      <ImageWithFallback
+                        src={project.image}
+                        alt={project.title}
+                        className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+                      />
+                    )}
 
                     {/* Subtle Gradient Veil */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent pointer-events-none" />
@@ -627,11 +640,25 @@ export function ProjectShowcaseGrid() {
             <div className="mt-6 space-y-6">
               {/* Media Preview */}
               <div className="relative aspect-[16/9] overflow-hidden rounded-xl bg-ink border border-hairline">
-                <ImageWithFallback
-                  src={selectedProject.image}
-                  alt={selectedProject.title}
-                  className="h-full w-full object-cover"
-                />
+                {selectedProject.video ? (
+                  <video
+                    src={selectedProject.video}
+                    poster={selectedProject.image}
+                    className="h-full w-full object-cover"
+                    controls
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    preload="metadata"
+                  />
+                ) : (
+                  <ImageWithFallback
+                    src={selectedProject.image}
+                    alt={selectedProject.title}
+                    className="h-full w-full object-cover"
+                  />
+                )}
               </div>
 
               {/* Lighthouse Scorecard */}

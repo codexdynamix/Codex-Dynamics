@@ -105,6 +105,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
     completionDate: '',
     site_url: '',
     image: '',
+    video: '',
     shortDescription: '',
     detailedDescription: '',
     challenge: '',
@@ -203,6 +204,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
       completionDate: '',
       site_url: '',
       image: '',
+      video: '',
       shortDescription: '',
       detailedDescription: '',
       challenge: '',
@@ -237,6 +239,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
       completionDate: proj.completionDate || '',
       site_url: proj.site_url || '',
       image: proj.image || '',
+      video: proj.video || '',
       shortDescription: proj.shortDescription || '',
       detailedDescription: proj.detailedDescription || '',
       challenge: proj.challenge || '',
@@ -338,16 +341,24 @@ export default function ProjectsTab({ showNotification = () => {} }) {
     if (await persistAndBroadcast(updated)) showNotification(`${publish ? 'Published' : 'Unpublished'} ${count} project(s).`);
   };
 
-  // Store uploaded image files in the media directory; only their URL goes in project data.
+  // Store uploaded media in the shared site library and keep only its URL in project data.
   const handleImageFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      showNotification('Image file is large (>5MB). Please select a compressed image.');
+      showNotification('Media file is larger than 5MB. Please select a smaller file.');
       e.target.value = '';
       return;
     }
+    const isVideo = file.type === 'video/mp4' || file.type === 'video/webm';
+    const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'];
+    if (!isVideo && !allowedImageTypes.includes(file.type)) {
+      showNotification('Choose a JPG, PNG, WebP, GIF, AVIF, MP4, or WebM file.');
+      e.target.value = '';
+      return;
+    }
+
     setIsUploadingImage(true);
     try {
       const data = await new Promise((resolve, reject) => {
@@ -359,9 +370,11 @@ export default function ProjectsTab({ showNotification = () => {} }) {
       const uploaded = await uploadAdminSiteImage({ name: file.name, data });
       setFormData(prev => ({
         ...prev,
-        image: uploaded.url,
+        ...(uploaded.mediaType === 'video'
+          ? { video: uploaded.url }
+          : { image: uploaded.url }),
       }));
-      showNotification('Image uploaded and ready to use.');
+      showNotification(`${isVideo ? 'Animation' : 'Image'} uploaded and ready to use.`);
     } catch (error) {
       showNotification(error.message || 'Image upload failed.');
     } finally {
@@ -432,6 +445,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
       completionDate: formData.completionDate.trim(),
       site_url: formData.site_url.trim() || '',
       image: formData.image.trim(),
+      video: formData.video.trim(),
       shortDescription: formData.shortDescription.trim(),
       detailedDescription: formData.detailedDescription.trim() || formData.shortDescription.trim(),
       challenge: formData.challenge.trim(),
@@ -1094,6 +1108,15 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                       onChange={e => setFormData({ ...formData, title: e.target.value })}
                     />
                   </div>
+                  <div className="crm-proj-form-group">
+                    <label>Or enter Direct Animation URL (MP4 / WebM)</label>
+                    <input
+                      type="text"
+                      placeholder="https://.../project-animation.mp4"
+                      value={formData.video}
+                      onChange={e => setFormData({ ...formData, video: e.target.value })}
+                    />
+                  </div>
 
                   <div className="crm-proj-form-group">
                     <label>Client / Brand Name *</label>
@@ -1156,7 +1179,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
 
               {/* 2. Media & Thumbnail Upload */}
               <div className="crm-proj-form-section">
-                <span className="crm-proj-section-title">2. Cover Media & Image Asset</span>
+                <span className="crm-proj-section-title">2. Cover Image & Animation</span>
 
                 <div
                   className="crm-proj-dropzone"
@@ -1165,35 +1188,63 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,video/webm"
                     className="crm-inline-f2892a2e8a"
                     onChange={handleImageFileChange}
+                    disabled={isUploadingImage}
                   />
                   <Upload size={24} color="var(--crm-accent)" />
                   <div className="crm-inline-f0f37ecba2">
-                    Click or drag & drop project screenshot here
+                    {isUploadingImage ? 'Uploading media…' : 'Click to upload a project image or animation'}
                   </div>
                   <div className="crm-inline-d77fd45478">
-                    Supports PNG, JPG, WebP, AVIF up to 5MB
+                    JPG, PNG, WebP, GIF, AVIF, MP4, or WebM · up to 5MB
                   </div>
                 </div>
 
-                {formData.image && (
+                {(formData.image || formData.video) && (
                   <div className="crm-proj-image-preview-wrap">
-                    <img
-                      src={formData.image}
-                      alt="Project Preview"
-                      className="crm-proj-image-preview"
-                    />
-                    <button
-                      type="button"
-                      className="crm-proj-remove-img-btn"
-                      onClick={() => setFormData({ ...formData, image: '' })}
-                      title="Remove image"
-                      aria-label="Remove project image"
-                    >
-                      <X size={14} />
-                    </button>
+                    {formData.video ? (
+                      <video
+                        src={formData.video}
+                        poster={formData.image || undefined}
+                        className="crm-proj-image-preview"
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                      />
+                    ) : (
+                      <img
+                        src={formData.image}
+                        alt="Project Preview"
+                        className="crm-proj-image-preview"
+                      />
+                    )}
+                    <div className="crm-inline-54a4986ffc">
+                      {formData.image && (
+                        <button
+                          type="button"
+                          className="crm-proj-remove-img-btn"
+                          onClick={() => setFormData(prev => ({ ...prev, image: '' }))}
+                          title="Remove image"
+                          aria-label="Remove project image"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                      {formData.video && (
+                        <button
+                          type="button"
+                          className="crm-proj-remove-img-btn"
+                          onClick={() => setFormData(prev => ({ ...prev, video: '' }))}
+                          title="Remove animation"
+                          aria-label="Remove project animation"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1420,9 +1471,16 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                 <button
                   type="submit"
                   className="crm-btn-primary"
+                  disabled={isSaving || isUploadingImage}
                 >
                   <Check size={14} />
-                  <span>{editingProject ? 'Save Changes' : 'Upload & Publish'}</span>
+                  <span>
+                    {isUploadingImage
+                      ? 'Uploading media…'
+                      : isSaving
+                        ? 'Saving…'
+                        : editingProject ? 'Save Changes' : 'Upload & Publish'}
+                  </span>
                 </button>
               </div>
             </form>

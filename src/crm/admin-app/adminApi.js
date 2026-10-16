@@ -230,9 +230,11 @@ export async function getAdminSiteContent() {
 }
 
 export async function runAdminSiteContentAction(action, record) {
+  const item = record && typeof record === 'object' ? { ...record } : {};
+  delete item._id;
   const body = ['create', 'update', 'delete'].includes(action)
-    ? { action, type: 'project', item: record, id: record?.id }
-    : { action, record };
+    ? { action, type: 'project', item, id: item.id }
+    : { action, record: item };
   return adminFetch('/api/admin/site-content/action', {
     method: 'POST',
     body,
