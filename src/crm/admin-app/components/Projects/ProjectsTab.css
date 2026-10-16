@@ -292,6 +292,94 @@
   box-shadow: 0 2px 8px rgba(10, 132, 255, 0.35);
 }
 
+.crm-proj-add-category-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--crm-accent, #0A84FF);
+}
+
+.crm-proj-category-add-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--crm-border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.crm-proj-category-add-form > label {
+  color: var(--crm-text-secondary, #8E8E93);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.crm-proj-category-add-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.crm-proj-category-add-controls input {
+  flex: 1 1 240px;
+  min-width: min(100%, 220px);
+  max-width: 420px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--crm-border, rgba(255, 255, 255, 0.12));
+  border-radius: 9px;
+  background: var(--crm-card, #23242A);
+  color: var(--crm-text-primary, #FFFFFF);
+  font: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.crm-proj-category-add-controls input:focus {
+  outline: none;
+  border-color: var(--crm-accent, #0A84FF);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2);
+}
+
+.crm-proj-category-add-controls button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.crm-proj-category-submit {
+  background: var(--crm-accent, #0A84FF);
+  color: #FFFFFF;
+}
+
+.crm-proj-category-submit:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.crm-proj-category-cancel {
+  border-color: var(--crm-border, rgba(255, 255, 255, 0.12)) !important;
+  background: transparent;
+  color: var(--crm-text-secondary, #8E8E93);
+}
+
+.crm-proj-category-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--crm-text-primary, #FFFFFF);
+}
+
+.crm-proj-category-add-controls button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 /* ── Project Cards Grid ──────────────────────────────────────────────────── */
 .crm-proj-grid {
   display: grid;

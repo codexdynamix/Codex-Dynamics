@@ -768,39 +768,38 @@ export default function ProjectsTab({ showNotification = () => {} }) {
               {cat}
             </button>
           ))}
-          {!isAddingCategory ? (
-            <button
-              type="button"
-              className="crm-proj-cat-pill"
-              onClick={() => setIsAddingCategory(true)}
-              aria-label="Add a project category"
-            >
-              <Plus size={13} />
-              <span>Add Category</span>
-            </button>
-          ) : (
-            <form
-              onSubmit={handleAddCategory}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
-            >
+          <button
+            type="button"
+            className="crm-proj-cat-pill crm-proj-add-category-trigger"
+            onClick={() => setIsAddingCategory((current) => !current)}
+            aria-expanded={isAddingCategory}
+            aria-label={isAddingCategory ? 'Close category form' : 'Add a project category'}
+          >
+            {isAddingCategory ? <X size={13} /> : <Plus size={13} />}
+            <span>{isAddingCategory ? 'Close' : 'Add Category'}</span>
+          </button>
+        </div>
+        {isAddingCategory && (
+          <form className="crm-proj-category-add-form" onSubmit={handleAddCategory}>
+            <label htmlFor="crm-new-project-category">New project category</label>
+            <div className="crm-proj-category-add-controls">
               <input
+                id="crm-new-project-category"
                 type="text"
                 value={categoryDraft}
                 onChange={(event) => setCategoryDraft(event.target.value)}
-                placeholder="New category name"
-                aria-label="New project category name"
+                placeholder="e.g. Mobile Applications"
                 maxLength={60}
                 autoFocus
                 required
                 disabled={isSavingCategory}
-                style={{ minWidth: 180, padding: '8px 10px', borderRadius: 8 }}
               />
-              <button type="submit" className="crm-btn-secondary" disabled={isSavingCategory}>
-                {isSavingCategory ? 'Adding…' : 'Add'}
+              <button type="submit" className="crm-proj-category-submit" disabled={isSavingCategory}>
+                {isSavingCategory ? 'Adding…' : 'Add Category'}
               </button>
               <button
                 type="button"
-                className="crm-btn-secondary"
+                className="crm-proj-category-cancel"
                 onClick={() => {
                   setIsAddingCategory(false);
                   setCategoryDraft('');
@@ -809,9 +808,9 @@ export default function ProjectsTab({ showNotification = () => {} }) {
               >
                 Cancel
               </button>
-            </form>
-          )}
-        </div>
+            </div>
+          </form>
+        )}
       </div>
 
       {/* ── Bulk Actions Floating Bar (When items selected) ──── */}
