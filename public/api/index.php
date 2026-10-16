@@ -764,6 +764,98 @@ if (preg_match('#^/admin/clients/([^/]+)(?:/(restore))?$#', $path, $matches)) {
     jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
 }
 
+if (preg_match('#^/admin/client-projects(?:/([^/]+))?$#', $path, $matches)) {
+    $projectId = isset($matches[1]) ? rawurldecode($matches[1]) : '';
+    $collection = 'client_projects';
+
+    if ($projectId === '' && $method === 'GET') {
+        $projects = MongoService::getCollection($collection, [
+            '$or' => [
+                ['archived_at' => ['$exists' => false]],
+                ['archived_at' => null],
+                ['archived_at' => ''],
+            ],
+        ], 1000);
+        foreach ($projects as &$project) {
+            $project['client_id'] = $project['client_id'] ?? $project['clientId'] ?? '';
+            unset($project['clientId']);
+        }
+        unset($project);
+        jsonOut(['ok' => true, 'projects' => $projects]);
+    }
+
+    if ($projectId === '' && $method === 'POST') {
+        $clientId = trim((string)($body['client_id'] ?? $body['clientId'] ?? ''));
+        $name = trim((string)($body['name'] ?? ''));
+        if ($clientId === '' || $name === '') {
+            jsonOut(['ok' => false, 'error' => 'A client and project name are required.'], 422);
+        }
+        if (MongoService::findOne('clients', ['id' => $clientId]) === null) {
+            jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+        }
+        unset($body['clientId'], $body['client_name'], $body['client_company'], $body['_id']);
+        $body['id'] = 'client_project_' . bin2hex(random_bytes(12));
+        $body['client_id'] = $clientId;
+        $body['name'] = $name;
+        $body['status'] = trim((string)($body['status'] ?? 'Planning')) ?: 'Planning';
+        $body['progress'] = max(0, min(100, (int)round((float)($body['progress'] ?? 0))));
+        $body['created_at'] = date('c');
+        $body['updated_at'] = date('c');
+        jsonOut(['ok' => true, 'project' => MongoService::insert($collection, $body)]);
+    }
+
+    if ($projectId !== '' && in_array($method, ['PATCH', 'DELETE'], true)) {
+        $project = MongoService::findOne($collection, ['id' => $projectId]);
+        if ($project === null || !empty($project['archived_at'])) {
+            jsonOut(['ok' => false, 'error' => 'Client project not found.'], 404);
+        }
+
+        if ($method === 'DELETE') {
+            MongoService::updateOne($collection, ['id' => $projectId], [
+                'archived_at' => date('c'),
+                'updated_at' => date('c'),
+            ]);
+            jsonOut(['ok' => true, 'archived' => true]);
+        }
+
+        $allowedFields = [
+            'client_id', 'clientId', 'name', 'description', 'service', 'status',
+            'progress', 'start_date', 'target_date', 'team_lead', 'milestones', 'recent_updates',
+        ];
+        $updates = array_intersect_key($body, array_flip($allowedFields));
+        if (!array_key_exists('client_id', $updates) && array_key_exists('clientId', $updates)) {
+            $updates['client_id'] = $updates['clientId'];
+        }
+        unset($updates['clientId']);
+        if (array_key_exists('client_id', $updates)) {
+            $clientId = trim((string)$updates['client_id']);
+            if ($clientId === '') {
+                jsonOut(['ok' => false, 'error' => 'Choose a client for this project.'], 422);
+            }
+            if (MongoService::findOne('clients', ['id' => $clientId]) === null) {
+                jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+            }
+            $updates['client_id'] = $clientId;
+        }
+        if (array_key_exists('name', $updates)) {
+            $updates['name'] = trim((string)$updates['name']);
+            if ($updates['name'] === '') {
+                jsonOut(['ok' => false, 'error' => 'Project name is required.'], 422);
+            }
+        }
+        if (array_key_exists('progress', $updates)) {
+            $updates['progress'] = max(0, min(100, (int)round((float)$updates['progress'])));
+        }
+        $updates['updated_at'] = date('c');
+        MongoService::updateOne($collection, ['id' => $projectId], $updates);
+        $updatedProject = MongoService::findOne($collection, ['id' => $projectId]);
+        $updatedProject['client_id'] = $updatedProject['client_id'] ?? $updatedProject['clientId'] ?? '';
+        jsonOut(['ok' => true, 'project' => $updatedProject]);
+    }
+
+    jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+}
+
 // 4. Content & Settings
 if ($path === '/crm/action' && $method === 'POST' && ($body['action'] ?? '') === 'upload_image') {
     $data = trim((string)($body['data'] ?? ''));
@@ -927,6 +1019,19 @@ if ($path === '/portal/login' && $method === 'POST') {
 if (str_starts_with($path, '/portal/data')) {
     $clientId = $_GET['client_id'] ?? '';
     $client = MongoService::findOne('clients', ['id' => $clientId]);
+    $projects = $clientId !== '' ? MongoService::getCollection('client_projects', [
+        '$and' => [
+            ['$or' => [
+                ['client_id' => $clientId],
+                ['clientId' => $clientId],
+            ]],
+            ['$or' => [
+                ['archived_at' => ['$exists' => false]],
+                ['archived_at' => null],
+                ['archived_at' => ''],
+            ]],
+        ],
+    ], 1000) : [];
     jsonOut([
         'ok' => true,
         'client' => $client,
@@ -939,15 +1044,7 @@ if (str_starts_with($path, '/portal/data')) {
                 'status' => 'Online',
             ]
         ],
-        'projects' => [
-            [
-                'id' => 'proj_1',
-                'clientId' => $clientId,
-                'name' => 'Enterprise Telephony Integration',
-                'status' => 'In Progress',
-                'progress' => 85,
-            ]
-        ],
+        'projects' => $projects,
         'invoices' => [],
         'payments' => [],
         'hosting' => [],

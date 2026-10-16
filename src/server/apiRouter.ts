@@ -716,14 +716,90 @@ apiRouter.get('/admin/pending-counts', async (_req: Request, res: Response) => {
 // 5. CLIENT PROJECTS & REVIEWS
 // ---------------------------------------------------------------------------
 apiRouter.get('/admin/client-projects', async (_req: Request, res: Response) => {
-  const projects = await getMongoCollection('client_projects').find();
-  res.json({ ok: true, projects });
+  const projects = await getMongoCollection('client_projects').find({
+    $or: [
+      { archived_at: { $exists: false } },
+      { archived_at: null },
+      { archived_at: '' },
+    ],
+  });
+  res.json({
+    ok: true,
+    projects: projects.map((project) => {
+      const { clientId, ...fields } = project;
+      return { ...fields, client_id: project.client_id ?? clientId ?? '' };
+    }),
+  });
 });
 
 apiRouter.post('/admin/client-projects', async (req: Request, res: Response) => {
-  const newProj = { ...req.body, id: req.body.id || `proj_${Date.now()}` };
+  const body = req.body || {};
+  const clientId = String(body.client_id ?? body.clientId ?? '').trim();
+  const name = String(body.name || '').trim();
+  if (!clientId || !name) {
+    return res.status(422).json({ ok: false, error: 'A client and project name are required.' });
+  }
+  const client = await getMongoCollection('clients').findOne({ id: clientId });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  const newProj = {
+    ...body,
+    id: `client_project_${randomUUID()}`,
+    client_id: clientId,
+    name,
+    status: String(body.status || 'Planning').trim(),
+    progress: Math.max(0, Math.min(100, Math.round(Number(body.progress) || 0))),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  delete newProj.clientId;
+  delete newProj.client_name;
+  delete newProj.client_company;
   await getMongoCollection('client_projects').insertOne(newProj);
   res.json({ ok: true, project: newProj });
+});
+
+apiRouter.patch('/admin/client-projects/:id', async (req: Request, res: Response) => {
+  const projects = getMongoCollection('client_projects');
+  const current = await projects.findOne({ id: req.params.id });
+  if (!current) return res.status(404).json({ ok: false, error: 'Client project not found.' });
+
+  const body = req.body || {};
+  const updates = { ...body };
+  delete updates.id;
+  delete updates._id;
+  delete updates.clientId;
+  delete updates.client_name;
+  delete updates.client_company;
+  delete updates.created_at;
+  delete updates.archived_at;
+
+  if (body.client_id !== undefined || body.clientId !== undefined) {
+    const clientId = String(body.client_id ?? body.clientId ?? '').trim();
+    if (!clientId) return res.status(422).json({ ok: false, error: 'Choose a client for this project.' });
+    const client = await getMongoCollection('clients').findOne({ id: clientId });
+    if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+    updates.client_id = clientId;
+  }
+  if (body.name !== undefined) {
+    updates.name = String(body.name || '').trim();
+    if (!updates.name) return res.status(422).json({ ok: false, error: 'Project name is required.' });
+  }
+  if (body.progress !== undefined) {
+    updates.progress = Math.max(0, Math.min(100, Math.round(Number(body.progress) || 0)));
+  }
+  updates.updated_at = new Date().toISOString();
+  await projects.updateOne({ id: req.params.id }, { $set: updates });
+  const project = await projects.findOne({ id: req.params.id });
+  res.json({ ok: true, project: { ...project, client_id: project?.client_id ?? project?.clientId ?? '' } });
+});
+
+apiRouter.delete('/admin/client-projects/:id', async (req: Request, res: Response) => {
+  const result = await getMongoCollection('client_projects').updateOne(
+    { id: req.params.id, $or: [{ archived_at: { $exists: false } }, { archived_at: null }, { archived_at: '' }] },
+    { $set: { archived_at: new Date().toISOString(), updated_at: new Date().toISOString() } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Client project not found.' });
+  res.json({ ok: true, archived: true });
 });
 
 apiRouter.get('/admin/client-identity-reviews', async (_req: Request, res: Response) => {
@@ -1250,7 +1326,18 @@ apiRouter.get('/portal/data', async (req: Request, res: Response) => {
   const clientId = String(req.query.client_id || '');
   const [client, projects, tickets, notifs, msgs] = await Promise.all([
     clientId ? getMongoCollection('clients').findOne({ id: clientId }) : null,
-    getMongoCollection('client_projects').find({ clientId }),
+    clientId ? getMongoCollection('client_projects').find({
+      $and: [
+        { $or: [{ client_id: clientId }, { clientId }] },
+        {
+          $or: [
+            { archived_at: { $exists: false } },
+            { archived_at: null },
+            { archived_at: '' },
+          ],
+        },
+      ],
+    }) : [],
     getMongoCollection('client_support_tickets').find({ clientId }),
     getMongoCollection('notifications').find(),
     getMongoCollection('messages').find(),
@@ -1273,16 +1360,7 @@ apiRouter.get('/portal/data', async (req: Request, res: Response) => {
         uptimePercent: 99.98,
       },
     ],
-    projects: projects.length ? projects : [
-      {
-        id: 'proj_1',
-        clientId,
-        name: 'Enterprise Telephony Integration',
-        status: 'In Progress',
-        progress: 85,
-        targetCompletion: '2026-11-30',
-      },
-    ],
+    projects,
     invoices: [
       { id: 'inv_101', clientId, number: 'CDX-2026-042', amount: 4800, status: 'Paid', date: '2026-10-01' },
     ],
