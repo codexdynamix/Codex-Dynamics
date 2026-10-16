@@ -7,6 +7,17 @@ import { SEED_STAFF } from './seedData.ts';
 import { normalizeAdminRole } from '../crm/roleNormalization.js';
 
 export const apiRouter = Router();
+
+function setPortalSessionCookie(req: Request, res: Response, token: string) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  res.cookie('cdx_portal_session', token, {
+    httpOnly: true,
+    secure: req.secure || forwardedProto === 'https',
+    sameSite: 'lax',
+    path: '/api/',
+    maxAge: 12 * 60 * 60 * 1000,
+  });
+}
 const seededSuperAdmin = SEED_STAFF.find((staff) => staff.id === 'staff_super_admin');
 const STAFF_CAPABILITY_CATALOG = {
   client_upload: 'Client Upload',
@@ -553,6 +564,7 @@ apiRouter.post('/admin/clients/:id/impersonate', async (req: Request, res: Respo
     email: storedClient.email || '',
   };
   const token = `cdx_portal_impersonate_${client.id}_${Date.now()}`;
+  setPortalSessionCookie(req, res, token);
   res.json({
     ok: true,
     token,
@@ -1285,6 +1297,7 @@ apiRouter.post('/portal/login', async (req: Request, res: Response) => {
     }
 
     const token = `cdx_portal_mongo_${client.id}_${Date.now()}`;
+    setPortalSessionCookie(req, res, token);
     await clientsCol.updateOne({ id: client.id }, { $set: { lastLoginAt: new Date().toISOString() } });
 
     res.json({
@@ -1395,7 +1408,12 @@ apiRouter.post('/portal/profile', async (req: Request, res: Response) => {
 
 async function portalTicketClient(req: Request, res: Response) {
   const authorization = String(req.headers.authorization || '');
-  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
+  const cookieToken = String(req.headers.cookie || '')
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('cdx_portal_session='))
+    ?.slice('cdx_portal_session='.length) || '';
+  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || decodeURIComponent(cookieToken);
   const match = token.match(/^cdx_portal_(?:mongo|impersonate)_(.+)_(\d{13})$/);
   if (!match) {
     res.status(401).json({ ok: false, error: 'Your portal session is invalid. Sign in again.' });

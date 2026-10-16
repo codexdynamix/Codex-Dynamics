@@ -223,9 +223,11 @@ export function PortalSupport({ client, requestFeature = false }: PortalSupportP
       }
     };
     window.addEventListener('cdx_chat_message_received', handleSync);
+    window.addEventListener('cdx_portal_database_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('cdx_chat_message_received', handleSync);
+      window.removeEventListener('cdx_portal_database_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, [client.id]);
