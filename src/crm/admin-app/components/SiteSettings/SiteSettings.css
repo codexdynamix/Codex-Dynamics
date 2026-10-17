@@ -627,6 +627,10 @@
 .crm-admin-app .crm-email-assign-form { display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid var(--crm-border);border-radius:8px;background:color-mix(in srgb,var(--crm-accent) 4%,var(--crm-bg)) }
 .crm-admin-app .crm-email-form-title { display:flex;align-items:center;gap:7px;color:var(--crm-text-primary);font-size:12px;font-weight:700 }
 .crm-admin-app .crm-email-form-grid { display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:end;gap:10px }
+.crm-admin-app.crm-admin-app .crm-email-form-grid .crm-settings-field { display:flex;flex-direction:column;gap:6px;min-width:0;margin:0 }
+.crm-admin-app.crm-admin-app .crm-email-form-grid .crm-settings-field > span { display:block;min-height:18px;line-height:18px }
+.crm-admin-app.crm-admin-app .crm-email-form-grid .crm-settings-field input,
+.crm-admin-app.crm-admin-app .crm-email-form-grid .crm-settings-field select { box-sizing:border-box;height:42px;margin:0 }
 @media(max-width:700px) {
   .crm-admin-app .crm-email-form-grid { grid-template-columns:1fr }
   .crm-admin-app .crm-email-assignment-actions { padding-left:0 }

@@ -28,6 +28,17 @@ interface PortalSupportProps {
   requestFeature?: boolean;
 }
 
+function areSameChatMessages(current: SharedChatMessage[], next: SharedChatMessage[]) {
+  return current.length === next.length && current.every((message, index) => {
+    const candidate = next[index];
+    return message.id === candidate.id
+      && message.text === candidate.text
+      && message.sender === candidate.sender
+      && message.senderName === candidate.senderName
+      && message.editedAt === candidate.editedAt;
+  });
+}
+
 function ClientDirectChat({ client }: { client: PortalClient }) {
   const [messages, setMessages] = useState<SharedChatMessage[]>([]);
   const [presence, setPresence] = useState({ staffTyping: false, staffOnline: false });
@@ -39,6 +50,7 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
   const [editingText, setEditingText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<number | null>(null);
+  const typingHeartbeatRef = useRef<number | null>(null);
   const typingActiveRef = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -47,7 +59,7 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
         portalDb.getSharedChatMessages(client.id),
         portalDb.getSharedChatPresence(),
       ]);
-      setMessages(history);
+      setMessages(current => areSameChatMessages(current, history) ? current : history);
       setPresence(currentPresence);
       setError('');
     } catch (loadError) {
@@ -60,9 +72,13 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
   const stopTyping = useCallback(() => {
     if (typingTimeoutRef.current !== null) window.clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = null;
+    if (typingHeartbeatRef.current !== null) window.clearInterval(typingHeartbeatRef.current);
+    typingHeartbeatRef.current = null;
     if (typingActiveRef.current) {
       typingActiveRef.current = false;
-      void portalDb.setSharedChatTyping(false).catch(() => {});
+      void portalDb.setSharedChatTyping(false).catch((error) => {
+        setError(error instanceof Error ? error.message : 'Could not update chat presence.');
+      });
     }
   }, []);
 
@@ -72,7 +88,12 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
     return () => {
       window.clearInterval(timer);
       if (typingTimeoutRef.current !== null) window.clearTimeout(typingTimeoutRef.current);
-      if (typingActiveRef.current) void portalDb.setSharedChatTyping(false).catch(() => {});
+      if (typingHeartbeatRef.current !== null) window.clearInterval(typingHeartbeatRef.current);
+      if (typingActiveRef.current) {
+        void portalDb.setSharedChatTyping(false).catch((error) => {
+          console.error('[PortalSupport] Could not clear chat typing presence.', error);
+        });
+      }
     };
   }, [refresh]);
 
@@ -85,10 +106,17 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
     const typing = Boolean(value.trim());
     if (typing && !typingActiveRef.current) {
       typingActiveRef.current = true;
-      void portalDb.setSharedChatTyping(true).catch(() => {});
+      void portalDb.setSharedChatTyping(true).catch((error) => {
+        setError(error instanceof Error ? error.message : 'Could not update chat presence.');
+      });
+      typingHeartbeatRef.current = window.setInterval(() => {
+        void portalDb.setSharedChatTyping(true).catch((error) => {
+          setError(error instanceof Error ? error.message : 'Could not update chat presence.');
+        });
+      }, 3000);
     }
     if (typingTimeoutRef.current !== null) window.clearTimeout(typingTimeoutRef.current);
-    if (typing) typingTimeoutRef.current = window.setTimeout(stopTyping, 2200);
+    if (typing) typingTimeoutRef.current = window.setTimeout(stopTyping, 8000);
     else stopTyping();
   };
 
@@ -128,8 +156,22 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
     }
   };
 
+  const deleteMessage = async (message: SharedChatMessage) => {
+    if (!window.confirm('Hide this message from your chat? The support team will still be able to see it.')) return;
+    setBusy(true);
+    setError('');
+    try {
+      await portalDb.deleteSharedChatMessage(message.id);
+      setMessages(current => current.filter(item => item.id !== message.id));
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'This message could not be deleted.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const clearChat = async () => {
-    if (!messages.length || !window.confirm('Delete the entire conversation for you and the Codex Dynamics team? This cannot be undone.')) return;
+    if (!messages.length || !window.confirm('Clear this conversation from your chat? The support team will still be able to see the messages.')) return;
     setBusy(true);
     setError('');
     try {
@@ -152,7 +194,7 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
           <p className="text-[11px] text-[#86868B]">{presence.staffTyping ? 'Support is typing…' : presence.staffOnline ? 'Support team online' : 'Messages are shared with your support team'}</p>
         </div>
       </div>
-      <button type="button" onClick={() => void clearChat()} disabled={busy || !messages.length} aria-label="Delete entire chat for both sides" title="Delete entire chat for both sides" className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[#8E8E93] hover:bg-[#FF3B30]/10 hover:text-[#FF3B30] disabled:opacity-40"><Trash2 size={16}/></button>
+      <button type="button" onClick={() => void clearChat()} disabled={busy || !messages.length} aria-label="Clear chat" title="Clear chat" className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[#8E8E93] hover:bg-[#FF3B30]/10 hover:text-[#FF3B30] disabled:opacity-40"><Trash2 size={16}/></button>
     </header>
     {error && <div role="alert" className="mx-4 mt-3 rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">{error}</div>}
     <div className="flex-1 space-y-4 overflow-y-auto bg-[#F5F5F7] p-4 dark:bg-[#101012] sm:p-6">
@@ -164,11 +206,12 @@ function ClientDirectChat({ client }: { client: PortalClient }) {
         const canEdit = own && Number.isFinite(created) && Date.now() - created >= 0 && Date.now() - created <= 7 * 60 * 1000;
         return <article key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
           <div className={`max-w-[88%] sm:max-w-[72%] ${own ? 'items-end' : 'items-start'} flex flex-col`}>
-            <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] text-[#86868B]"><span className="font-medium">{message.senderName || (own ? client.name : 'Codex Dynamics Support')}</span><span>·</span><time>{Number.isFinite(created) ? new Date(created).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Time unavailable'}</time></div>
+            <div className="mb-1 flex items-center gap-1.5 px-1 text-[10px] text-[#86868B]"><span className="font-medium">{own ? 'You' : message.senderName || 'Codex Dynamics Support'}</span><span>·</span><time>{Number.isFinite(created) ? new Date(created).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Time unavailable'}</time></div>
             {editingId === message.id ? <div className="flex w-full gap-1.5"><textarea autoFocus value={editingText} maxLength={5000} onChange={event => setEditingText(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-black/[0.1] bg-white p-2 text-sm text-[#1D1D1F] dark:border-white/[0.1] dark:bg-[#1C1C1E] dark:text-white"/><button type="button" aria-label="Save edit" disabled={busy} onClick={() => void saveEdit(message)} className="rounded-lg bg-[#0071E3] px-2 text-white"><Check size={15}/></button><button type="button" aria-label="Cancel edit" onClick={() => setEditingId('')} className="rounded-lg border border-black/[0.1] px-2 text-[#6E6E73] dark:border-white/[0.12]"><X size={15}/></button></div> : <div className={`whitespace-pre-wrap break-words rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${own ? 'bg-[#0071E3] text-white' : 'border border-black/[0.05] bg-white text-[#1D1D1F] dark:border-white/[0.08] dark:bg-[#1E1E22] dark:text-[#F5F5F7]'}`}>
               {message.text}{message.editedAt && <span className="ml-2 text-[10px] opacity-70">Edited</span>}
             </div>}
             {canEdit && editingId !== message.id && <button type="button" onClick={() => { setEditingId(message.id); setEditingText(message.text); }} className="mt-1 inline-flex items-center gap-1 px-1 text-[10px] text-[#6E6E73] hover:text-[#0071E3]"><Pencil size={11}/>Edit for {Math.max(0, Math.ceil((7 * 60 * 1000 - (Date.now() - created)) / 60000))} min</button>}
+            {editingId !== message.id && <button type="button" disabled={busy} onClick={() => void deleteMessage(message)} className="mt-1 inline-flex items-center gap-1 px-1 text-[10px] text-[#6E6E73] hover:text-[#FF3B30] disabled:opacity-50"><Trash2 size={11}/>Delete</button>}
           </div>
         </article>;
       })}

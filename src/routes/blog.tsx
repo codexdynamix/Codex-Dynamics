@@ -71,9 +71,78 @@ When evaluating your digital product stack, treat typography and layout as physi
 function BlogPageRoute() {
   const { slug } = useSearch({ from: "/blog" });
   const navigate = useNavigate();
-  const [currentPost] = useState<BlogPostData>(DEFAULT_POST);
-  const [isLoading] = useState(false);
-  void slug;
+  const [currentPost, setCurrentPost] = useState<BlogPostData | null>(slug ? null : DEFAULT_POST);
+  const [isLoading, setIsLoading] = useState(Boolean(slug));
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    if (!slug) {
+      setCurrentPost(DEFAULT_POST);
+      setLoadError("");
+      setIsLoading(false);
+      return;
+    }
+
+    let active = true;
+    setCurrentPost(null);
+    setLoadError("");
+    setIsLoading(true);
+
+    const loadPost = async () => {
+      try {
+        const response = await fetch("/api/public/content", {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(`Article request failed (${response.status}).`);
+        const payload = await response.json();
+        if (!payload?.ok || !Array.isArray(payload.blogs)) {
+          throw new Error("The published articles response was invalid.");
+        }
+
+        const post = (payload.blogs as BlogPost[]).find((candidate) => candidate.slug === slug);
+        if (!post) {
+          if (active) setLoadError("This article could not be found or is not published.");
+          return;
+        }
+
+        const tags = Array.isArray(post.tags)
+          ? post.tags
+          : typeof post.tags === "string"
+            ? post.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
+            : undefined;
+        if (active) {
+          setCurrentPost({
+            id: post.id,
+            title: post.title,
+            slug: post.slug,
+            excerpt: post.excerpt,
+            metaTitle: post.meta_title,
+            metaDescription: post.meta_description,
+            content: post.content,
+            author: post.author,
+            publishedAt: post.created_at,
+            updatedAt: post.updated_at,
+            category: post.category,
+            coverImage: post.cover_image || post.image_url,
+            tags,
+            focusKeyword: post.focus_keyword,
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setLoadError(error instanceof Error ? error.message : "The published article could not be loaded.");
+        }
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    };
+
+    void loadPost();
+    return () => {
+      active = false;
+    };
+  }, [slug]);
 
   const handleBack = () => {
     void navigate({ to: "/" });
@@ -81,16 +150,18 @@ function BlogPageRoute() {
 
   return (
     <SiteCanvas>
-      <SEO
-        title={currentPost.title}
-        description={currentPost.excerpt || currentPost.title}
-        ogType="article"
-        articleAuthor={currentPost.author}
-        articlePublishedTime={currentPost.publishedAt}
-        articleSection={currentPost.category}
-        articleTags={currentPost.tags}
-        keywords={currentPost.tags}
-      />
+      {currentPost && (
+        <SEO
+          title={currentPost.metaTitle || currentPost.title}
+          description={currentPost.metaDescription || currentPost.excerpt || currentPost.title}
+          ogType="article"
+          articleAuthor={currentPost.author}
+          articlePublishedTime={currentPost.publishedAt}
+          articleSection={currentPost.category}
+          articleTags={currentPost.tags}
+          keywords={currentPost.focusKeyword ? [currentPost.focusKeyword, ...(currentPost.tags || [])] : currentPost.tags}
+        />
+      )}
       <Nav />
       <main className="pt-16">
         {isLoading ? (
@@ -98,8 +169,13 @@ function BlogPageRoute() {
             <div className="inline-block size-6 animate-spin rounded-full border-2 border-blue border-t-transparent" />
             <p className="mt-3 text-xs text-muted-foreground">Loading article...</p>
           </div>
-        ) : (
+        ) : currentPost ? (
           <Blog post={currentPost} onBack={handleBack} />
+        ) : (
+          <div className="shell max-w-4xl py-24 text-center" role="alert">
+            <h1 className="text-xl font-semibold text-label">Article unavailable</h1>
+            <p className="mt-3 text-sm text-muted-foreground">{loadError || "This article could not be loaded."}</p>
+          </div>
         )}
       </main>
       <Footer />

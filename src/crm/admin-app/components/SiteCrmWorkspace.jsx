@@ -37,6 +37,10 @@ async function crmAction(action, payload = {}) {
   if (action === 'save_webhook') return saveAdminWebhookSettings(payload.url);
   if (action === 'test_webhook') return testAdminWebhookSettings();
   if (action === 'change_password') return changeCurrentAdminPassword(payload.currentPassword, payload.newPassword);
+  const blogActions = { save_blog: 'create', update_blog: 'update', delete_blog: 'delete' };
+  if (blogActions[action]) {
+    return runAdminSiteContentAction(blogActions[action], payload, 'blog');
+  }
   return runAdminSiteContentAction(action, payload);
 }
 
@@ -83,6 +87,7 @@ export default function SiteCrmWorkspace({
   standalone = false,
   onOpenClientProfile = null,
   clients = [],
+  currentUser,
 }) {
   const [tab, setTab] = useState(defaultTab);
   const [data, setData] = useState(null);
@@ -319,7 +324,7 @@ export default function SiteCrmWorkspace({
     )}
 
     {tab === 'chat' && (
-      <LiveChatWorkspace showNotification={showNotification} />
+      <LiveChatWorkspace showNotification={showNotification} clients={clients} currentUser={currentUser} />
     )}
 
     {tab === 'tools' && (

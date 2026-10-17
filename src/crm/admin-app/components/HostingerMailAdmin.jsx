@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, AlertCircle, BarChart3, CheckCircle2, KeyRound, Link2, Mail, Pencil, RefreshCw, Search, ShieldCheck, Trash2, UserRound, X } from 'lucide-react';
+import { Activity, AlertCircle, CheckCircle2, KeyRound, Link2, Mail, Pencil, RefreshCw, Search, Send, ShieldCheck, Trash2, UserRound, X } from 'lucide-react';
 import {
   assignClientMailboxAdmin, getClientMailboxesAdmin, getHostingerMailIntegrationAdmin,
-  getHostingerMailOverviewAdmin, getHostingerMailboxStatsAdmin,
+  getHostingerMailOverviewAdmin, sendHostingerMailToClientAdmin,
   listHostingerMailboxesAdmin, removeClientMailboxAdmin, removeHostingerMailIntegrationAdmin,
   reassignClientMailboxAdmin, saveHostingerMailIntegrationAdmin, testHostingerMailIntegrationAdmin,
   updateClientMailboxAdmin, assignStaffMailboxAdmin, getStaffMailboxesAdmin,
@@ -16,12 +16,59 @@ const whatsappHref = value => {
   return `https://wa.me/${digits}?text=${encodeURIComponent('Hello, I would like to discuss this with you.')}`;
 };
 
-export function CommunicationActionModal({ open, title, account, onClose, onSendMail, onWhatsApp, onCall }) {
+export function CommunicationActionModal({ open, title, account, clientId, onClose, onSendMail, onWhatsApp, onCall }) {
   const [tab, setTab] = useState('mail');
-  useEffect(() => { if (open) setTab('mail'); }, [open]);
+  const [mailboxes, setMailboxes] = useState([]);
+  const [senderMailboxId, setSenderMailboxId] = useState('');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [mailBusy, setMailBusy] = useState(false);
+  const [mailError, setMailError] = useState('');
+  const [mailNotice, setMailNotice] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    setTab('mail');
+    setSubject('');
+    setMessage('');
+    setMailError('');
+    setMailNotice('');
+    setMailboxes([]);
+    setSenderMailboxId('');
+    if (!clientId) return;
+    let active = true;
+    getClientMailboxesAdmin(clientId)
+      .then(assignments => {
+        if (!active) return;
+        const enabled = assignments.filter(mailbox => mailbox.enabled !== false);
+        setMailboxes(enabled);
+        setSenderMailboxId(enabled[0]?.providerMailboxId || '');
+      })
+      .catch(error => {
+        if (active) setMailError(error.message || 'Could not load the client’s assigned mailboxes.');
+      });
+    return () => { active = false; };
+  }, [open, clientId]);
   if (!open) return null;
   const mailHref = account?.email ? `mailto:${account.email}` : '';
   const whatsapp = account?.phone ? whatsappHref(account.phone) : '';
+  const sendEmail = async event => {
+    event.preventDefault();
+    if (!clientId || !senderMailboxId) return;
+    setMailBusy(true);
+    setMailError('');
+    setMailNotice('');
+    try {
+      const result = await sendHostingerMailToClientAdmin(senderMailboxId, { subject, text: message });
+      setMailNotice(`Email sent from ${result.from} to ${result.to}.`);
+      setSubject('');
+      setMessage('');
+      onSendMail?.(account);
+    } catch (error) {
+      setMailError(error.message || 'Could not send email to the client.');
+    } finally {
+      setMailBusy(false);
+    }
+  };
   return createPortal(<div className="crm-profile-overlay" role="presentation" onClick={onClose}>
     <div className="crm-profile-modal crm-inline-61fc146f6b" role="dialog" aria-modal="true" aria-label={title || 'Communication actions'} onClick={e => e.stopPropagation()} >
       <div className="crm-profile-header-wrap"><div className="crm-profile-header-left"><div className="crm-profile-avatar-box crm-inline-8ccc74c40c" >✉</div><div className="crm-profile-title-block"><h3 className="crm-profile-user-name">{title || 'Contact'} </h3><div className="crm-profile-clearance-meta"><span className="crm-inline-95e927bf07">Communication</span></div></div></div><button type="button" className="crm-profile-close-btn" onClick={onClose} aria-label="Close communication actions"><X size={16} /></button></div>
@@ -33,7 +80,21 @@ export function CommunicationActionModal({ open, title, account, onClose, onSend
       <div className="crm-profile-content-scroll crm-inline-e4b0bfe8ab" >
         <div className="crm-inline-ec42375ef9">
           {tab === 'mail' && <>
-            <div className="crm-cred-card"><div className="crm-cred-card-header"><div className="crm-cred-card-header-left"><Mail size={12} className="crm-inline-17b97a833c" /><span>Send email</span></div></div><div className="crm-cred-field"><div className="crm-cred-label"><span>Recipient</span></div><div className="crm-cred-value-box"><span className="crm-cred-value-text">{account?.email || 'No email address available'}</span></div></div><div className="crm-cred-actions"><button type="button" className="crm-mail-primary" disabled={!mailHref} onClick={() => { onSendMail?.(account); onClose(); window.location.href = mailHref; }}>Open mail composer</button></div></div>
+            <form className="crm-mail-modal-compose" onSubmit={sendEmail}>
+              <div className="crm-mail-modal-compose-heading"><Mail size={15}/><strong>Compose email to client</strong></div>
+              {mailError && <div role="alert" className="crm-mail-admin-alert error">{mailError}</div>}
+              {mailNotice && <div role="status" className="crm-mail-admin-alert success">{mailNotice}</div>}
+              {clientId && mailboxes.length > 0
+                ? <label className="crm-settings-field"><span>Send from</span><select required value={senderMailboxId} onChange={event => setSenderMailboxId(event.target.value)} className="crm-settings-select">{mailboxes.map(mailbox => <option key={mailbox.id} value={mailbox.providerMailboxId}>{mailbox.displayName || mailbox.emailAddress} · {mailbox.emailAddress}</option>)}</select></label>
+                : <div className="crm-mail-admin-callout">{clientId ? 'Assign an active Hostinger mailbox to this client before sending email.' : 'Hostinger sending is available from a client profile.'}</div>}
+              <label className="crm-settings-field"><span>To</span><input type="email" value={account?.email || ''} readOnly placeholder="No client email address available" className="crm-settings-input"/></label>
+              <label className="crm-settings-field"><span>Subject</span><input required maxLength={200} value={subject} onChange={event => setSubject(event.target.value)} className="crm-settings-input"/></label>
+              <label className="crm-settings-field"><span>Message</span><textarea required maxLength={20000} rows={6} value={message} onChange={event => setMessage(event.target.value)} className="crm-settings-input crm-mail-modal-compose-message"/></label>
+              <div className="crm-mail-modal-compose-actions">
+                {mailHref && <a className="crm-mail-secondary" href={mailHref} onClick={() => onSendMail?.(account)}>Open in default mail app</a>}
+                <button type="submit" className="crm-mail-primary" disabled={!senderMailboxId || !account?.email || mailBusy || !subject.trim() || !message.trim()}><Send size={14}/>{mailBusy ? 'Sending…' : 'Send email'}</button>
+              </div>
+            </form>
           </>}
           {tab === 'whatsapp' && <>
             <div className="crm-cred-card"><div className="crm-cred-card-header"><div className="crm-cred-card-header-left"><span className="crm-inline-47ecaff778" /> <span>Chat on WhatsApp</span></div></div><div className="crm-cred-field"><div className="crm-cred-label"><span>Phone number</span></div><div className="crm-cred-value-box"><span className="crm-cred-value-text">{account?.phone || 'No phone number available'}</span></div></div><div className="crm-cred-actions"><button type="button" className="crm-mail-primary crm-inline-9034c42064"  disabled={!whatsapp} onClick={() => { onWhatsApp?.(account); onClose(); window.open(whatsapp, '_blank', 'noopener,noreferrer'); }}>Open WhatsApp</button></div></div>
@@ -210,31 +271,7 @@ const relative = value => {
   if (minutes < 1440) return `${Math.round(minutes / 60)} h ago`;
   return date.toLocaleDateString();
 };
-const bytes = value => {
-  if (!value) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const index = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
-  return `${(value / 1024 ** index).toFixed(index > 1 ? 1 : 0)} ${units[index]}`;
-};
 const clientLabel = c => c ? (c.company || c.clientCompany || c.name || c.clientName || c.email || c.id || c.clientId) : '';
-
-function MailboxStats({ resourceId }) {
-  const [stats, setStats] = useState(null);
-  const [error, setError] = useState('');
-  useEffect(() => {
-    let active = true;
-    getHostingerMailboxStatsAdmin(resourceId).then(d => { if (active) setStats(d); }).catch(e => { if (active) setError(e.message || 'Could not load mailbox statistics.'); });
-    return () => { active = false; };
-  }, [resourceId]);
-  if (error) return <div className="crm-mail-monitor-stats"><span className="crm-mail-monitor-muted">{error}</span></div>;
-  if (!stats) return <div className="crm-mail-monitor-stats"><span className="crm-mail-monitor-muted">Loading live statistics from Hostinger…</span></div>;
-  const cell = (label, folder) => <div><span>{label}</span><strong>{folder ? folder.messageCount : '—'}</strong>{folder?.unreadCount ? <em>{folder.unreadCount} unread</em> : null}</div>;
-  return <div className="crm-mail-monitor-stats">
-    {cell('Inbox', stats.folders?.inbox)}{cell('Sent', stats.folders?.sent)}{cell('Spam', stats.folders?.junk)}{cell('Trash', stats.folders?.trash)}
-    <div><span>Storage</span><strong>{stats.quota?.supported && stats.quota.totalLimit ? `${stats.quota.totalPercentage}%` : '—'}</strong>{stats.quota?.supported && stats.quota.totalLimit ? <em>{bytes(stats.quota.totalUsage)} of {bytes(stats.quota.totalLimit)}</em> : null}</div>
-    <p className="crm-mail-monitor-muted">Counts only. Message content is never shown to administrators.</p>
-  </div>;
-}
 
 export function HostingerMailboxMonitor({ refreshKey = 0 }) {
   const [data, setData] = useState(null);
@@ -245,7 +282,6 @@ export function HostingerMailboxMonitor({ refreshKey = 0 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [assigning, setAssigning] = useState({});
-  const [expanded, setExpanded] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -297,7 +333,6 @@ export function HostingerMailboxMonitor({ refreshKey = 0 }) {
     if (!window.confirm(`Remove ${clientLabel(m.assignment)}'s access to ${m.address}? The Hostinger mailbox and its email are not deleted.`)) return;
     return act(m.resourceId, () => removeClientMailboxAdmin(m.assignment.clientId, m.assignment.id), `Access to ${m.address} removed. The Hostinger mailbox was not changed.`);
   };
-
   const status = m => {
     if (m.inHostinger === false) return ['danger', 'Missing in Hostinger'];
     if (!m.assignment) return ['idle', 'Unassigned'];
@@ -354,13 +389,12 @@ export function HostingerMailboxMonitor({ refreshKey = 0 }) {
             <div className="crm-mail-monitor-main">
               <div className="crm-mail-monitor-mailbox"><div className="crm-email-icon"><Mail size={16}/></div><div><strong>{m.address || 'Unknown address'}</strong><span>{m.resourceId}{m.assignment?.displayName && m.assignment.displayName !== m.address ? ` · “${m.assignment.displayName}”` : ''}</span></div></div>
               <div className="crm-mail-monitor-client">{m.assignment ? <><UserRound size={14}/><div><strong>{clientLabel(m.assignment)}</strong><span>{m.assignment.clientEmail || m.assignment.clientName}</span></div></> : <span className="crm-mail-monitor-muted">Not assigned to a client</span>}</div>
-              <div className="crm-mail-monitor-activity">{m.assignment ? <><span><Activity size={12}/> Opened {relative(m.activity?.lastOpenedAt)}</span><span>Sent {m.activity?.sentLast30Days || 0} in 30 days</span></> : <span className="crm-mail-monitor-muted">—</span>}</div>
+              <div className="crm-mail-monitor-activity">{m.assignment && m.activity ? <><span><Activity size={12}/> Opened {relative(m.activity.lastOpenedAt)}</span><span>Sent {m.activity.sentLast30Days ?? 0} in 30 days</span></> : <span className="crm-mail-monitor-muted">{m.assignment ? 'Usage activity unavailable' : '—'}</span>}</div>
               <span className={`crm-mail-monitor-pill ${tone}`}>{label}</span>
             </div>
             <div className="crm-mail-monitor-actions">
               {m.inHostinger !== false && <button type="button" disabled={rowBusy} className="crm-mail-primary" onClick={() => setAssigning(a => ({ ...a, [m.resourceId]: form ? undefined : { clientId: '', displayName: m.assignment?.displayName || '' } }))}>{form ? 'Cancel' : m.assignment ? 'Transfer' : 'Assign to client'}</button>}
               {m.assignment && <label className="crm-mail-monitor-toggle"><input type="checkbox" checked={m.assignment.enabled} disabled={rowBusy} onChange={() => void toggle(m)}/> Portal access</label>}
-              {m.inHostinger !== false && <button type="button" className="crm-mail-secondary" onClick={() => setExpanded(e => e === m.resourceId ? '' : m.resourceId)}><BarChart3 size={13}/>{expanded === m.resourceId ? 'Hide stats' : 'Stats'}</button>}
               {m.assignment && <button type="button" disabled={rowBusy} className="crm-mail-danger" onClick={() => void unassign(m)}><Trash2 size={13}/>Remove access</button>}
             </div>
             {form && <div className="crm-mail-monitor-assign">
@@ -369,7 +403,6 @@ export function HostingerMailboxMonitor({ refreshKey = 0 }) {
               <button type="button" disabled={rowBusy || !form.clientId} onClick={() => void assign(m)} className="crm-mail-primary">{rowBusy ? 'Saving…' : m.assignment ? 'Transfer mailbox' : 'Assign mailbox'}</button>
               {m.assignment && <p className="crm-mail-monitor-muted">Transferring moves portal access to the new client. Saved Codex drafts and blocked senders of the previous client are removed; email in Hostinger is untouched.</p>}
             </div>}
-            {expanded === m.resourceId && <MailboxStats resourceId={m.resourceId}/>}
           </div>;
         })}</div>}
     </>}

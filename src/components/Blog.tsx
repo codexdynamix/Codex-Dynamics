@@ -12,6 +12,8 @@ export interface BlogPostData {
   title: string;
   slug?: string;
   excerpt?: string;
+  metaTitle?: string;
+  metaDescription?: string;
   content: string;
   author?: string;
   publishedAt?: string;
@@ -272,8 +274,8 @@ export function Blog({ post, onBack, className }: BlogProps) {
 
       {/* 2. Document Head SEO & Open Graph Tags */}
       <SEO
-        title={post.title}
-        description={post.excerpt || post.title}
+        title={post.metaTitle || post.title}
+        description={post.metaDescription || post.excerpt || post.title}
         ogType="article"
         ogImage={post.coverImage || "/hero/studio.jpg"}
         articleAuthor={post.author || "Codex Dynamics"}

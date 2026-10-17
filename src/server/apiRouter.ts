@@ -18,7 +18,51 @@ function setPortalSessionCookie(req: Request, res: Response, token: string) {
     maxAge: 12 * 60 * 60 * 1000,
   });
 }
+function setAdminSessionCookie(req: Request, res: Response, token: string) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  res.cookie('cdx_admin_session', token, {
+    httpOnly: true,
+    secure: req.secure || forwardedProto === 'https',
+    sameSite: 'lax',
+    path: '/api/',
+    maxAge: 12 * 60 * 60 * 1000,
+  });
+}
+function clearAdminSessionCookie(req: Request, res: Response) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  res.clearCookie('cdx_admin_session', {
+    httpOnly: true,
+    secure: req.secure || forwardedProto === 'https',
+    sameSite: 'lax',
+    path: '/api/',
+  });
+}
 const seededSuperAdmin = SEED_STAFF.find((staff) => staff.id === 'staff_super_admin');
+async function requireChatStaff(req: Request, res: Response) {
+  const authorization = String(req.headers.authorization || '');
+  const cookieToken = String(req.headers.cookie || '')
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('cdx_admin_session='))
+    ?.slice('cdx_admin_session='.length) || '';
+  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || cookieToken;
+  const match = token.match(/^cdx_adm_(?:mongo|php_mongo)_(.+)_(\d{10,13})$/);
+  if (!match) {
+    res.status(401).json({ ok: false, error: 'A valid staff session is required.' });
+    return null;
+  }
+  const issuedAt = Number(match[2]) * (match[2].length === 10 ? 1000 : 1);
+  if (!Number.isFinite(issuedAt) || issuedAt > Date.now() + 60_000 || Date.now() - issuedAt > 12 * 60 * 60 * 1000) {
+    res.status(401).json({ ok: false, error: 'The staff session has expired. Sign in again.' });
+    return null;
+  }
+  const staff = await getMongoCollection('staff_users').findOne({ id: match[1] });
+  if (!staff || staff.status === 'Suspended' || staff.deleted_at || staff.is_bin === true) {
+    res.status(401).json({ ok: false, error: 'The staff account is unavailable.' });
+    return null;
+  }
+  return staff;
+}
 const STAFF_CAPABILITY_CATALOG = {
   client_upload: 'Client Upload',
   create_agent: 'Create Agent',
@@ -46,6 +90,43 @@ function decodeStaffCapabilities(value: unknown): Record<string, boolean> {
   return Object.fromEntries(
     Object.entries(decoded).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')
   );
+}
+
+async function staffCanNotifyClient(
+  staff: Record<string, unknown>,
+  client: Record<string, unknown>
+): Promise<boolean> {
+  const role = normalizeAdminRole(staff.role);
+  const agentId = String(client.assignedToAgent || client.assigned_agent_id || client.agentId || client.agent_id || '');
+  const agent = agentId
+    ? await getMongoCollection('staff_users').findOne({ id: agentId })
+    : null;
+  const teamId = String(
+    client.assignedToTeam || client.assigned_team_id || client.teamId || client.team_id
+    || agent?.teamId || agent?.team_id || ''
+  );
+  const team = teamId ? await getMongoCollection('teams').findOne({ id: teamId }) : null;
+  const clientOfficeId = String(
+    client.assignedToOffice || client.assigned_office_id || client.officeId || client.office_id
+    || agent?.officeId || agent?.office_id || team?.officeId || team?.office_id || ''
+  );
+
+  if (role === 'Office Manager') {
+    const officeId = String(staff.officeId || staff.office_id || '');
+    return Boolean(officeId && clientOfficeId === officeId);
+  }
+  if (role === 'Team Leader') {
+    const staffTeamId = String(staff.teamId || staff.team_id || '');
+    const clientTeamLeaderId = String(client.assignedToTeamLeader || client.assigned_team_leader_id || '');
+    return Boolean(
+      (staffTeamId && teamId === staffTeamId)
+      || (clientTeamLeaderId && clientTeamLeaderId === String(staff.id || ''))
+    );
+  }
+  if (role === 'Agent') {
+    return Boolean(agentId && agentId === String(staff.id || ''));
+  }
+  return false;
 }
 
 // CORS & Middleware
@@ -219,6 +300,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
 
     const canonicalRole = normalizeAdminRole(staff.role || role || 'super-admin');
     const token = `cdx_adm_mongo_${staff.id}_${Date.now()}`;
+    setAdminSessionCookie(req, res, token);
     await staffCol.updateOne(
       { id: staff.id },
       { $set: { role: canonicalRole, last_login_at: new Date().toISOString() } }
@@ -281,7 +363,8 @@ apiRouter.post('/admin/me/password', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.post('/admin/logout', (_req: Request, res: Response) => {
+apiRouter.post('/admin/logout', (req: Request, res: Response) => {
+  clearAdminSessionCookie(req, res);
   res.json({ ok: true });
 });
 
@@ -588,14 +671,42 @@ apiRouter.post('/admin/clients/:id/set-password', async (req: Request, res: Resp
   res.json({ ok: true, password: newPass, message: 'Password updated in MongoDB.' });
 });
 
+const clientAssignmentFieldAliases: Record<string, string[]> = {
+  assignedToOffice: ['assigned_office_id', 'assignedToOffice', 'officeId'],
+  assignedToTeam: ['assigned_team_id', 'assignedToTeam', 'teamId'],
+  assignedToTeamLeader: ['assigned_team_leader_id', 'assignedToTeamLeader', 'teamLeaderId'],
+  assignedToAgent: ['assigned_agent_id', 'assignedToAgent', 'agentId'],
+};
+
+function getClientAssignmentUpdates(source: Record<string, unknown>) {
+  const updates: Record<string, string | null> = {};
+  for (const [field, aliases] of Object.entries(clientAssignmentFieldAliases)) {
+    const providedKey = aliases.find((key) => Object.prototype.hasOwnProperty.call(source, key));
+    if (!providedKey) continue;
+    const value = source[providedKey];
+    if (value !== null && typeof value !== 'string') {
+      throw new Error(`Invalid ${providedKey} assignment value.`);
+    }
+    updates[field] = typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+  return updates;
+}
+
 apiRouter.post('/admin/clients/:id/assign', async (req: Request, res: Response) => {
-  const updates: any = {};
-  if (req.body.assigned_office_id !== undefined) updates.assignedToOffice = req.body.assigned_office_id;
-  if (req.body.assigned_team_id !== undefined) updates.assignedToTeam = req.body.assigned_team_id;
-  if (req.body.assigned_agent_id !== undefined) updates.assignedToAgent = req.body.assigned_agent_id;
-  await getMongoCollection('clients').updateOne({ id: req.params.id }, { $set: updates });
-  const client = await getMongoCollection('clients').findOne({ id: req.params.id });
-  res.json({ ok: true, client });
+  let updates: Record<string, string | null>;
+  try {
+    updates = getClientAssignmentUpdates(req.body || {});
+  } catch (error) {
+    return res.status(422).json({ ok: false, error: error instanceof Error ? error.message : 'Invalid client assignment.' });
+  }
+  if (Object.keys(updates).length === 0) {
+    return res.status(422).json({ ok: false, error: 'At least one client assignment field is required.' });
+  }
+  const clients = getMongoCollection('clients');
+  const client = await clients.findOne({ id: req.params.id });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  await clients.updateOne({ id: req.params.id }, { $set: updates });
+  return res.json({ ok: true, client: await clients.findOne({ id: req.params.id }) });
 });
 
 apiRouter.post('/admin/clients/:id/reset-status', async (req: Request, res: Response) => {
@@ -649,20 +760,56 @@ apiRouter.all('/admin/clients/:id/appointments', async (req: Request, res: Respo
 });
 
 apiRouter.post('/admin/clients/assign-bulk', async (req: Request, res: Response) => {
-  const { clientIds, officeId, teamId, agentId } = req.body || {};
-  if (Array.isArray(clientIds) && clientIds.length > 0) {
-    await getMongoCollection('clients').updateMany(
-      { id: { $in: clientIds } },
-      {
-        $set: {
-          ...(officeId !== undefined ? { assignedToOffice: officeId } : {}),
-          ...(teamId !== undefined ? { assignedToTeam: teamId } : {}),
-          ...(agentId !== undefined ? { assignedToAgent: agentId } : {}),
-        },
-      }
-    );
+  const body = req.body || {};
+  const clientIds = Array.isArray(body.client_ids)
+    ? body.client_ids
+    : Array.isArray(body.clientIds) ? body.clientIds : null;
+  if (!Array.isArray(body.assignments) && !clientIds) {
+    return res.status(422).json({ ok: false, error: 'Client IDs or assignments must be provided.' });
   }
-  res.json({ ok: true });
+  const rawAssignments: unknown[] = Array.isArray(body.assignments)
+    ? body.assignments
+    : (clientIds || []).map((clientId: unknown) => ({
+        client_id: clientId,
+        ...body,
+      }));
+  if (rawAssignments.length === 0) {
+    return res.status(422).json({ ok: false, error: 'At least one client assignment is required.' });
+  }
+
+  let assignments: Array<{ id: string; updates: Record<string, string | null> }>;
+  try {
+    assignments = rawAssignments.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('Each client assignment must be an object.');
+      }
+      const source = entry as Record<string, unknown>;
+      const id = String(source.client_id ?? source.clientId ?? '').trim();
+      if (!id) throw new Error('Each client assignment must include a client ID.');
+      const updates = getClientAssignmentUpdates(source);
+      if (Object.keys(updates).length === 0) {
+        throw new Error(`Assignment for client ${id} has no supported fields.`);
+      }
+      return { id, updates };
+    });
+  } catch (error) {
+    return res.status(422).json({ ok: false, error: error instanceof Error ? error.message : 'Invalid client assignments.' });
+  }
+
+  const clients = getMongoCollection('clients');
+  const ids = [...new Set(assignments.map((assignment) => assignment.id))];
+  const existing = await clients.find({ id: { $in: ids } });
+  const existingIds = new Set(existing.map((client: { id: string }) => client.id));
+  const missingIds = ids.filter((id) => !existingIds.has(id));
+  if (missingIds.length > 0) {
+    return res.status(404).json({ ok: false, error: `Client not found: ${missingIds.join(', ')}.` });
+  }
+
+  for (const { id, updates } of assignments) {
+    await clients.updateOne({ id }, { $set: updates });
+  }
+  const updatedClients = await clients.find({ id: { $in: ids } });
+  return res.json({ ok: true, clients: updatedClients });
 });
 
 apiRouter.post('/admin/clients/bulk-status', async (req: Request, res: Response) => {
@@ -1053,7 +1200,179 @@ async function verifyHostingerMailToken(token: string): Promise<{ mailboxes: any
   return { mailboxes: Array.isArray(account.mailboxes) ? account.mailboxes : [] };
 }
 
+function hostingerMailboxList(mailboxes: unknown): Array<{ resourceId: string; address: string; name: string; status: string }> {
+  if (!Array.isArray(mailboxes)) return [];
+  return mailboxes.flatMap((mailbox: any) => {
+    const address = String(
+      typeof mailbox === 'string'
+        ? mailbox
+        : mailbox?.email || mailbox?.address || mailbox?.emailAddress || mailbox?.username || ''
+    ).trim();
+    const resourceId = String(
+      typeof mailbox === 'string'
+        ? mailbox
+        : mailbox?.resourceId || mailbox?.id || mailbox?.mailboxId || mailbox?.mailbox_id || address
+    ).trim();
+    if (!address || !resourceId) return [];
+    return [{
+      resourceId,
+      address,
+      name: String(mailbox?.name || mailbox?.displayName || address),
+      status: String(mailbox?.status || 'Active'),
+    }];
+  });
+}
+
+async function hostingerMailboxSnapshot() {
+  const integrations = getMongoCollection('hostinger_mail_integrations');
+  const integration = await integrations.findOne({});
+  if (!integration?.token) {
+    return { integration, mailboxes: [], providerError: '' };
+  }
+  try {
+    const { mailboxes } = await verifyHostingerMailToken(String(integration.token));
+    const now = new Date().toISOString();
+    await integrations.updateOne({}, {
+      $set: {
+        status: 'connected',
+        mailboxes,
+        last_tested_at: now,
+        last_success_at: now,
+      },
+    });
+    return { integration: { ...integration, status: 'connected', mailboxes }, mailboxes: hostingerMailboxList(mailboxes), providerError: '' };
+  } catch (error: any) {
+    await integrations.updateOne({}, {
+      $set: { status: 'connection_error', last_tested_at: new Date().toISOString() },
+    });
+    return {
+      integration: { ...integration, status: 'connection_error' },
+      mailboxes: hostingerMailboxList(integration.mailboxes),
+      providerError: error.message || 'Could not sync with Hostinger Mail.',
+    };
+  }
+}
+
+async function requireAdminStaff(req: Request, res: Response) {
+  return requireChatStaff(req, res);
+}
+
+function mailboxAssignmentCollection(ownerType: 'client' | 'staff') {
+  return getMongoCollection(ownerType === 'client' ? 'client_mailboxes' : 'staff_mailboxes');
+}
+
+async function handleMailboxAssignments(
+  req: Request,
+  res: Response,
+  ownerType: 'client' | 'staff',
+  ownerId: string,
+  assignmentId = ''
+) {
+  if (!(await requireAdminStaff(req, res))) return;
+  if (!ownerId) return res.status(400).json({ ok: false, error: `${ownerType}_id is required.` });
+  const owner = await getMongoCollection(ownerType === 'client' ? 'clients' : 'staff_users').findOne({ id: ownerId });
+  if (!owner) return res.status(404).json({ ok: false, error: `${ownerType === 'client' ? 'Client' : 'Staff account'} not found.` });
+
+  const assignments = mailboxAssignmentCollection(ownerType);
+  const ownerField = ownerType === 'client' ? 'clientId' : 'staffId';
+  if (!assignmentId && req.method === 'GET') {
+    const rows = await assignments.find({ [ownerField]: ownerId });
+    return res.json({ ok: true, assignments: rows.map(row => ({
+      ...row,
+      emailAddress: row.emailAddress || row.email_address || '',
+      displayName: row.displayName || row.display_name || '',
+      enabled: row.enabled !== false,
+    })) });
+  }
+
+  if (!assignmentId && req.method === 'POST') {
+    const providerMailboxId = String(req.body?.providerMailboxId || '').trim();
+    const displayName = String(req.body?.displayName || '').trim();
+    if (!providerMailboxId) return res.status(422).json({ ok: false, error: 'Choose a Hostinger mailbox to assign.' });
+    if (displayName.length > 191) return res.status(422).json({ ok: false, error: 'Display name must be 191 characters or fewer.' });
+    const snapshot = await hostingerMailboxSnapshot();
+    if (snapshot.providerError) return res.status(502).json({ ok: false, error: snapshot.providerError });
+    const mailbox = snapshot.mailboxes.find(item => item.resourceId === providerMailboxId);
+    if (!mailbox) return res.status(404).json({ ok: false, error: 'That mailbox is not present in the current Hostinger account.' });
+    if (await assignments.findOne({ providerMailboxId })) {
+      return res.status(409).json({ ok: false, error: 'That mailbox is already assigned. Transfer its existing assignment instead.' });
+    }
+    const now = new Date().toISOString();
+    const assignment = {
+      id: `mail_assignment_${randomUUID()}`,
+      [ownerField]: ownerId,
+      providerMailboxId,
+      emailAddress: mailbox.address,
+      displayName: displayName || mailbox.address,
+      enabled: req.body?.enabled !== false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await assignments.insertOne(assignment);
+    return res.status(201).json({ ok: true, assignment });
+  }
+
+  if (!assignmentId) return res.status(405).json({ ok: false, error: 'Method not allowed.' });
+  const assignment = await assignments.findOne({ id: assignmentId, [ownerField]: ownerId });
+  if (!assignment) return res.status(404).json({ ok: false, error: 'Mailbox assignment not found.' });
+  if (req.method === 'PATCH') {
+    const patch: Record<string, unknown> = {};
+    if (typeof req.body?.enabled === 'boolean') patch.enabled = req.body.enabled;
+    if (typeof req.body?.displayName === 'string') {
+      const displayName = req.body.displayName.trim();
+      if (!displayName || displayName.length > 191) {
+        return res.status(422).json({ ok: false, error: 'Display name must be between 1 and 191 characters.' });
+      }
+      patch.displayName = displayName;
+    }
+    if (!Object.keys(patch).length) return res.status(422).json({ ok: false, error: 'Provide an enabled or displayName update.' });
+    patch.updatedAt = new Date().toISOString();
+    await assignments.updateOne({ id: assignmentId, [ownerField]: ownerId }, { $set: patch });
+    return res.json({ ok: true, assignment: { ...assignment, ...patch } });
+  }
+  if (req.method === 'DELETE') {
+    await assignments.deleteOne({ id: assignmentId, [ownerField]: ownerId });
+    return res.json({ ok: true, removed: true });
+  }
+  return res.status(405).json({ ok: false, error: 'Method not allowed.' });
+}
+
+async function handleMailboxReassignment(
+  req: Request,
+  res: Response,
+  ownerType: 'client' | 'staff'
+) {
+  if (!(await requireAdminStaff(req, res))) return;
+  if (req.body?.confirmed !== true) return res.status(422).json({ ok: false, error: 'Confirm the mailbox access transfer.' });
+  const assignmentId = String(req.params.assignmentId || '').trim();
+  const targetId = String(ownerType === 'client' ? req.body?.targetClientId || '' : req.body?.targetStaffId || '').trim();
+  if (!assignmentId || !targetId) return res.status(422).json({ ok: false, error: 'A mailbox assignment and target account are required.' });
+  const ownerCollection = getMongoCollection(ownerType === 'client' ? 'clients' : 'staff_users');
+  const target = await ownerCollection.findOne({ id: targetId });
+  if (!target) return res.status(404).json({ ok: false, error: 'The target account was not found.' });
+  const assignments = mailboxAssignmentCollection(ownerType);
+  const assignment = await assignments.findOne({ id: assignmentId });
+  if (!assignment) return res.status(404).json({ ok: false, error: 'Mailbox assignment not found.' });
+  const ownerField = ownerType === 'client' ? 'clientId' : 'staffId';
+  const duplicate = await assignments.findOne({
+    providerMailboxId: assignment.providerMailboxId,
+    [ownerField]: targetId,
+    id: { $ne: assignmentId },
+  });
+  if (duplicate) return res.status(409).json({ ok: false, error: 'The target account already has this mailbox assigned.' });
+  const displayName = String(req.body?.displayName || '').trim();
+  if (displayName.length > 191) return res.status(422).json({ ok: false, error: 'Display name must be 191 characters or fewer.' });
+  const patch: Record<string, unknown> = {
+    [ownerField]: targetId,
+    updatedAt: new Date().toISOString(),
+  };
+  if (displayName) patch.displayName = displayName;
+  await assignments.updateOne({ id: assignmentId }, { $set: patch });
+  return res.json({ ok: true, assignment: { ...assignment, ...patch } });
+}
+
 apiRouter.all('/admin/integrations/hostinger-mail', async (req: Request, res: Response) => {
+  if (!(await requireAdminStaff(req, res))) return;
   const col = getMongoCollection('hostinger_mail_integrations');
   if (req.method === 'POST') {
     const token = String(req.body?.token || '').trim();
@@ -1106,6 +1425,7 @@ apiRouter.all('/admin/integrations/hostinger-mail', async (req: Request, res: Re
 });
 
 apiRouter.post('/admin/integrations/hostinger-mail/test', async (req: Request, res: Response) => {
+  if (!(await requireAdminStaff(req, res))) return;
   const integration = await getMongoCollection('hostinger_mail_integrations').findOne({});
   const token = String(req.body?.token || integration?.token || '').trim();
   if (!token) return res.status(422).json({ ok: false, error: 'Enter a Hostinger Mail API token or save one first.' });
@@ -1144,34 +1464,185 @@ apiRouter.post('/admin/integrations/hostinger-mail/test', async (req: Request, r
   }
 });
 
-apiRouter.get('/admin/hostinger/mailboxes', async (_req: Request, res: Response) => {
-  const mailboxes = await getMongoCollection('client_mailboxes').find();
+apiRouter.get('/admin/hostinger/mailboxes', async (req: Request, res: Response) => {
+  if (!(await requireAdminStaff(req, res))) return;
+  const { integration, mailboxes, providerError } = await hostingerMailboxSnapshot();
+  if (providerError) return res.status(502).json({ ok: false, error: providerError });
+  const [clientAssignments, staffAssignments] = await Promise.all([
+    getMongoCollection('client_mailboxes').find(),
+    getMongoCollection('staff_mailboxes').find(),
+  ]);
   res.json({
     ok: true,
-    mailboxes: mailboxes.length ? mailboxes : [
-      { id: 'mb_1', email: 'support@codexdynamics.com', name: 'Primary Support', status: 'Active' },
-      { id: 'mb_2', email: 'billing@codexdynamics.com', name: 'Billing Desk', status: 'Active' },
-    ],
+    mailboxes: mailboxes.map(mailbox => {
+      const clientAssignment = clientAssignments.find(item => item.providerMailboxId === mailbox.resourceId);
+      const staffAssignment = staffAssignments.find(item => item.providerMailboxId === mailbox.resourceId);
+      return {
+        ...mailbox,
+        assignedClientId: clientAssignment?.clientId || '',
+        assignedStaffId: staffAssignment?.staffId || '',
+      };
+    }),
+    configured: Boolean(integration?.token),
   });
 });
 
-apiRouter.get('/admin/hostinger/overview', async (_req: Request, res: Response) => {
+apiRouter.get('/admin/hostinger/overview', async (req: Request, res: Response) => {
+  if (!(await requireAdminStaff(req, res))) return;
+  const { integration, mailboxes: providerMailboxes, providerError } = await hostingerMailboxSnapshot();
+  const [clients, clientAssignments, staffAssignments] = await Promise.all([
+    getMongoCollection('clients').find(clientDeletionFilter(undefined)),
+    getMongoCollection('client_mailboxes').find(),
+    getMongoCollection('staff_mailboxes').find(),
+  ]);
+  const clientsById = new Map(clients.map(client => [String(client.id), client]));
+  const assignmentsByMailbox = new Map<string, any>();
+  for (const assignment of clientAssignments) {
+    assignmentsByMailbox.set(String(assignment.providerMailboxId), assignment);
+  }
+  const mailboxes: any[] = providerMailboxes.map(mailbox => {
+    const assignment = assignmentsByMailbox.get(mailbox.resourceId);
+    const client = assignment ? clientsById.get(String(assignment.clientId)) : null;
+    return {
+      ...mailbox,
+      inHostinger: true,
+      assignment: assignment ? {
+        ...assignment,
+        clientId: String(assignment.clientId),
+        clientName: client?.name || client?.company || client?.email || String(assignment.clientId),
+        clientCompany: client?.company || '',
+        clientEmail: client?.email || '',
+        portalActive: client?.portal_active !== false && client?.portalActive !== false,
+        enabled: assignment.enabled !== false,
+      } : null,
+    };
+  });
+  for (const assignment of clientAssignments) {
+    if (providerMailboxes.some(mailbox => mailbox.resourceId === assignment.providerMailboxId)) continue;
+    const client = clientsById.get(String(assignment.clientId));
+    mailboxes.push({
+      resourceId: String(assignment.providerMailboxId || ''),
+      address: String(assignment.emailAddress || ''),
+      name: String(assignment.displayName || assignment.emailAddress || ''),
+      status: 'Missing in Hostinger',
+      inHostinger: false,
+      assignment: {
+        ...assignment,
+        clientId: String(assignment.clientId),
+        clientName: client?.name || client?.company || client?.email || String(assignment.clientId),
+        clientCompany: client?.company || '',
+        clientEmail: client?.email || '',
+        portalActive: client?.portal_active !== false && client?.portalActive !== false,
+        enabled: assignment.enabled !== false,
+      },
+    });
+  }
   res.json({
     ok: true,
-    quota: { used: '1.2 GB', total: '10 GB', percentage: 12 },
-    mailboxesCount: 2,
-    domain: 'codexdynamics.com',
+    integration: {
+      configured: Boolean(integration?.token),
+      status: integration?.status || 'not_configured',
+      mailboxCount: providerMailboxes.length,
+      lastTestedAt: integration?.last_tested_at || null,
+      lastSuccessAt: integration?.last_success_at || null,
+    },
+    mailboxes,
+    clients: clients.map(client => ({
+      id: String(client.id),
+      name: String(client.name || client.company || ''),
+      company: String(client.company || ''),
+      email: String(client.email || ''),
+      portalActive: client.portal_active !== false && client.portalActive !== false,
+    })),
+    staffAssignments,
+    providerError,
+    mailboxesCount: providerMailboxes.length,
+    domain: providerMailboxes[0]?.address.split('@')[1] || '',
+    quota: null,
   });
 });
+
+apiRouter.post('/admin/hostinger/mailboxes/:resourceId/send-to-client', async (req: Request, res: Response) => {
+  const staff = await requireAdminStaff(req, res);
+  if (!staff) return;
+  if (normalizeAdminRole(staff.role) !== 'Super Admin') {
+    return res.status(403).json({ ok: false, error: 'Only Super Admins can send email from the admin mail workspace.' });
+  }
+  const resourceId = String(req.params.resourceId || '').trim();
+  const subject = String(req.body?.subject || '').trim();
+  const text = String(req.body?.text || '').trim();
+  if (!resourceId) return res.status(400).json({ ok: false, error: 'A sender mailbox is required.' });
+  if (!subject || subject.length > 200) {
+    return res.status(422).json({ ok: false, error: 'Subject must be between 1 and 200 characters.' });
+  }
+  if (!text || text.length > 20000) {
+    return res.status(422).json({ ok: false, error: 'Message must be between 1 and 20000 characters.' });
+  }
+
+  const [snapshot, assignment] = await Promise.all([
+    hostingerMailboxSnapshot(),
+    getMongoCollection('client_mailboxes').findOne({ providerMailboxId: resourceId }),
+  ]);
+  if (snapshot.providerError) return res.status(502).json({ ok: false, error: snapshot.providerError });
+  if (!snapshot.integration?.token) return res.status(503).json({ ok: false, error: 'Hostinger Mail is not configured. Save a valid token first.' });
+  const mailbox = snapshot.mailboxes.find(item => item.resourceId === resourceId);
+  if (!mailbox) return res.status(404).json({ ok: false, error: 'The sender mailbox was not found in the connected Hostinger account.' });
+  if (!assignment || assignment.enabled === false) {
+    return res.status(409).json({ ok: false, error: 'This mailbox is not actively assigned to a client.' });
+  }
+  const client = await getMongoCollection('clients').findOne({ id: String(assignment.clientId) });
+  const recipient = String(client?.email || '').trim();
+  if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+    return res.status(422).json({ ok: false, error: 'The assigned client does not have a valid email address.' });
+  }
+
+  let response: Awaited<ReturnType<typeof fetch>>;
+  try {
+    response = await fetch(`https://api.mail.hostinger.com/api/v1/mailboxes/${encodeURIComponent(resourceId)}/send`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `******`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ to: [recipient], subject, text }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch {
+    return res.status(502).json({ ok: false, error: 'Could not reach Hostinger Mail to send the message. Try again.' });
+  }
+  const providerPayload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = response.status === 401 || response.status === 403
+      ? 'Hostinger rejected the token or denied access to this sender mailbox.'
+      : providerPayload?.error || providerPayload?.message || `Hostinger Mail could not send the message (HTTP ${response.status}).`;
+    return res.status(502).json({ ok: false, error: message });
+  }
+  return res.json({ ok: true, sent: true, from: mailbox.address, to: recipient });
+});
+
+apiRouter.all('/admin/clients/:clientId/mailboxes', (req: Request, res: Response) =>
+  handleMailboxAssignments(req, res, 'client', String(req.params.clientId || ''))
+);
+apiRouter.all('/admin/clients/:clientId/mailboxes/:assignmentId', (req: Request, res: Response) =>
+  handleMailboxAssignments(req, res, 'client', String(req.params.clientId || ''), String(req.params.assignmentId || ''))
+);
+apiRouter.post('/admin/client-mailboxes/:assignmentId/reassign', (req: Request, res: Response) =>
+  handleMailboxReassignment(req, res, 'client')
+);
+apiRouter.all('/admin/staff/:staffId/mailboxes', (req: Request, res: Response) =>
+  handleMailboxAssignments(req, res, 'staff', String(req.params.staffId || ''))
+);
+apiRouter.all('/admin/staff/:staffId/mailboxes/:assignmentId', (req: Request, res: Response) =>
+  handleMailboxAssignments(req, res, 'staff', String(req.params.staffId || ''), String(req.params.assignmentId || ''))
+);
+apiRouter.post('/admin/staff-mailboxes/:assignmentId/reassign', (req: Request, res: Response) =>
+  handleMailboxReassignment(req, res, 'staff')
+);
 
 apiRouter.all('/portal/mailboxes', async (_req: Request, res: Response) => {
   const mailboxes = await getMongoCollection('client_mailboxes').find();
-  res.json({
-    ok: true,
-    mailboxes: mailboxes.length ? mailboxes : [
-      { id: 'mb_c1', email: 'portal@apexlogistics.io', name: 'Client Desk', quotaUsed: '140MB' },
-    ],
-  });
+  res.json({ ok: true, mailboxes });
 });
 
 apiRouter.post('/portal/mail/reply', (_req: Request, res: Response) => {
@@ -1182,84 +1653,475 @@ apiRouter.post('/portal/mail/reply', (_req: Request, res: Response) => {
 // 9. MESSAGES, SUPPORT CHAT & NOTIFICATIONS
 // ---------------------------------------------------------------------------
 apiRouter.all('/admin/messages', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
   const msgCol = getMongoCollection('messages');
   if (req.method === 'POST') {
-    const msg = { ...req.body, id: `msg_${Date.now()}`, created_at: new Date().toISOString() };
+    const userId = String(req.body?.user_id || '').trim();
+    const body = String(req.body?.body || '').trim();
+    if (!userId || !body || body.length > 5000) {
+      return res.status(422).json({ ok: false, error: 'A client and a message of 1 to 5000 characters are required.' });
+    }
+    const senderName = String(req.body?.sender_name || '').trim().slice(0, 120);
+    const msg = {
+      user_id: userId,
+      body,
+      sender: 'agent',
+      sender_id: String(staff.id),
+      sender_name: senderName || String(staff.name || 'Codex Dynamics Support'),
+      id: `msg_${randomUUID()}`,
+      created_at: new Date().toISOString(),
+    };
     await msgCol.insertOne(msg);
     return res.json({ ok: true, message: msg });
   }
-  const messages = await msgCol.find();
+  if (req.method === 'DELETE') {
+    const userId = String(req.query.user_id || '').trim();
+    if (!userId) return res.status(400).json({ ok: false, error: 'user_id is required to clear a chat.' });
+    const result = await msgCol.deleteMany({
+      $or: [{ user_id: userId }, { clientId: userId }, { client_id: userId }],
+    });
+    return res.json({ ok: true, deletedCount: result.deletedCount });
+  }
+  const userId = String(req.query.user_id || '').trim();
+  const filter = {
+    $and: [
+      ...(userId ? [{ $or: [{ user_id: userId }, { clientId: userId }, { client_id: userId }] }] : []),
+      { hidden_for_staff: { $ne: String(staff.id) } },
+    ],
+  };
+  const messages = await msgCol.find(filter, { sort: { created_at: 1 } });
   res.json({ ok: true, messages });
 });
 
 apiRouter.post('/admin/messages/read', async (req: Request, res: Response) => {
-  await getMongoCollection('messages').updateMany({ clientId: req.body.clientId }, { $set: { read: true } });
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const userId = String(req.body?.user_id || req.body?.clientId || '').trim();
+  if (!userId) return res.status(400).json({ ok: false, error: 'user_id is required.' });
+  await getMongoCollection('messages').updateMany({
+    $or: [{ user_id: userId }, { clientId: userId }, { client_id: userId }],
+    sender: 'client',
+  }, { $set: { read: true, read_at: new Date().toISOString() } });
   res.json({ ok: true });
 });
 
-apiRouter.get('/admin/messages/unread_counts', async (_req: Request, res: Response) => {
-  const unread = await getMongoCollection('messages').countDocuments({ read: { $ne: true } });
-  res.json({ ok: true, unreadCount: unread });
+apiRouter.delete('/admin/messages/:messageId', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const messageId = String(req.params.messageId || '').trim();
+  const userId = String(req.query.user_id || '').trim();
+  if (!messageId) return res.status(400).json({ ok: false, error: 'message_id is required.' });
+  if (!userId) return res.status(400).json({ ok: false, error: 'user_id is required.' });
+  const filter: Record<string, unknown> = { id: messageId };
+  filter.$and = [
+    { $or: [{ user_id: userId }, { clientId: userId }, { client_id: userId }] },
+  ];
+  if (req.query.mode === 'me') {
+    const result = await getMongoCollection('messages').updateOne(
+      filter,
+      { $addToSet: { hidden_for_staff: String(staff.id) } },
+    );
+    if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Chat message not found.' });
+    return res.json({ ok: true, hidden: true });
+  }
+  const result = await getMongoCollection('messages').deleteOne(filter);
+  if (!result.deletedCount) return res.status(404).json({ ok: false, error: 'Chat message not found.' });
+  res.json({ ok: true, deletedCount: result.deletedCount });
 });
 
-apiRouter.get('/admin/messages/threads', async (_req: Request, res: Response) => {
-  const messages = await getMongoCollection('messages').find();
+apiRouter.get('/admin/messages/unread_counts', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const unreadMessages = await getMongoCollection('messages').find({
+    read: { $ne: true },
+    sender: 'client',
+  });
+  const counts: Record<string, number> = {};
+  for (const message of unreadMessages) {
+    const clientId = String(message.user_id || message.clientId || message.client_id || '');
+    if (clientId) counts[clientId] = (counts[clientId] || 0) + 1;
+  }
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  res.json({ ok: true, counts, total, unreadCount: total });
+});
+
+apiRouter.get('/admin/messages/threads', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const messages = await getMongoCollection('messages').find({
+    hidden_for_staff: { $ne: String(staff.id) },
+  });
   res.json({ ok: true, threads: messages });
 });
 
-apiRouter.all('/admin/messages/presence', (_req: Request, res: Response) => {
-  res.json({ ok: true, online: true });
+apiRouter.all('/admin/messages/presence', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const clientId = String(req.body?.user_id || req.query.user_id || '').trim();
+  if (!clientId) return res.status(400).json({ ok: false, error: 'user_id is required.' });
+  const presenceCol = getMongoCollection('client_chat_presence');
+  const now = new Date().toISOString();
+  const staffTypingUpdate = req.method === 'POST'
+    ? {
+        staff_typing: Boolean(req.body?.is_typing),
+        staff_typing_at: req.body?.is_typing ? now : null,
+      }
+    : {};
+  await presenceCol.updateOne({ id: `chat_presence_${clientId}` }, {
+    $set: {
+      id: `chat_presence_${clientId}`,
+      clientId,
+      staff_online_at: now,
+      ...staffTypingUpdate,
+    },
+  }, { upsert: true });
+  const presence = await presenceCol.findOne({ id: `chat_presence_${clientId}` });
+  const fresh = (value: unknown, seconds: number) => {
+    const time = new Date(String(value || '')).getTime();
+    return Number.isFinite(time) && Date.now() - time <= seconds * 1000;
+  };
+  res.json({
+    ok: true,
+    presence: {
+      client_online: fresh(presence?.client_online_at, 30),
+      client_typing: Boolean(presence?.client_typing) && fresh(presence?.client_typing_at, 8),
+      staff_online: fresh(presence?.staff_online_at, 30),
+      staff_typing: Boolean(presence?.staff_typing) && fresh(presence?.staff_typing_at, 8),
+    },
+  });
 });
 
-apiRouter.all('/portal/messages/presence', (_req: Request, res: Response) => {
-  res.json({ ok: true, online: true });
+apiRouter.all('/portal/messages/presence', async (req: Request, res: Response) => {
+  const client = await portalTicketClient(req, res);
+  if (!client) return;
+  const clientId = String(client.id);
+  const presenceCol = getMongoCollection('client_chat_presence');
+  const now = new Date().toISOString();
+  if (req.method === 'POST') {
+    const isTyping = Boolean(req.body?.is_typing);
+    await presenceCol.updateOne({ id: `chat_presence_${clientId}` }, {
+      $set: {
+        id: `chat_presence_${clientId}`,
+        clientId,
+        client_online_at: now,
+        client_typing: isTyping,
+        client_typing_at: isTyping ? now : null,
+      },
+    }, { upsert: true });
+  } else {
+    await presenceCol.updateOne({ id: `chat_presence_${clientId}` }, {
+      $set: { id: `chat_presence_${clientId}`, clientId, client_online_at: now },
+    }, { upsert: true });
+  }
+  const presence = await presenceCol.findOne({ id: `chat_presence_${clientId}` });
+  const fresh = (value: unknown, seconds: number) => {
+    const time = new Date(String(value || '')).getTime();
+    return Number.isFinite(time) && Date.now() - time <= seconds * 1000;
+  };
+  res.json({
+    ok: true,
+    presence: {
+      staff_online: fresh(presence?.staff_online_at, 30),
+      staff_typing: Boolean(presence?.staff_typing) && fresh(presence?.staff_typing_at, 8),
+      client_online: true,
+    },
+  });
 });
 
 apiRouter.all('/client/messages', async (req: Request, res: Response) => {
+  const client = await portalTicketClient(req, res);
+  if (!client) return;
+  const clientId = String(client.id);
   const msgCol = getMongoCollection('messages');
   if (req.method === 'POST') {
-    const msg = { ...req.body, id: `msg_${Date.now()}`, created_at: new Date().toISOString() };
+    const body = String(req.body?.body || '').trim();
+    if (!body || body.length > 5000) {
+      return res.status(422).json({ ok: false, error: 'Message must be between 1 and 5000 characters.' });
+    }
+    const msg = {
+      id: `msg_${randomUUID()}`,
+      user_id: clientId,
+      sender: 'client',
+      sender_id: clientId,
+      sender_name: String(client.name || client.company || 'Client'),
+      body,
+      created_at: new Date().toISOString(),
+      read: false,
+    };
     await msgCol.insertOne(msg);
     return res.json({ ok: true, message: msg });
   }
-  const messages = await msgCol.find();
+  if (req.method === 'DELETE') {
+    const result = await msgCol.updateMany({
+      $or: [{ user_id: clientId }, { clientId }, { client_id: clientId }],
+    }, { $set: { hidden_for_client: true } });
+    return res.json({ ok: true, hiddenCount: result.modifiedCount });
+  }
+  const requestedClientId = String(req.query.user_id || clientId);
+  if (requestedClientId !== clientId) {
+    return res.status(403).json({ ok: false, error: 'You cannot access another client’s chat.' });
+  }
+  const messages = await msgCol.find({
+    $and: [
+      { $or: [{ user_id: clientId }, { clientId }, { client_id: clientId }] },
+      { hidden_for_client: { $ne: true } },
+    ],
+  }, { sort: { created_at: 1 } });
   res.json({ ok: true, messages });
 });
 
+apiRouter.patch('/client/messages/:messageId', async (req: Request, res: Response) => {
+  const client = await portalTicketClient(req, res);
+  if (!client) return;
+  const messageId = String(req.params.messageId || '');
+  const body = String(req.body?.body || '').trim();
+  if (!body || body.length > 5000) {
+    return res.status(422).json({ ok: false, error: 'Message must be between 1 and 5000 characters.' });
+  }
+  const messageFilter = {
+    id: messageId,
+    sender: 'client',
+    $or: [{ user_id: String(client.id) }, { clientId: String(client.id) }, { client_id: String(client.id) }],
+  };
+  const existing = await getMongoCollection('messages').findOne(messageFilter);
+  if (!existing) return res.status(404).json({ ok: false, error: 'Chat message not found.' });
+  const createdAt = new Date(String(existing.created_at || '')).getTime();
+  if (!Number.isFinite(createdAt) || Date.now() - createdAt > 7 * 60 * 1000) {
+    return res.status(403).json({ ok: false, error: 'Messages can only be edited for seven minutes after sending.' });
+  }
+  const editedAt = new Date().toISOString();
+  await getMongoCollection('messages').updateOne(messageFilter, { $set: { body, edited_at: editedAt } });
+  res.json({ ok: true, message: { ...existing, body, edited_at: editedAt } });
+});
+
+apiRouter.delete('/client/messages/:messageId', async (req: Request, res: Response) => {
+  const client = await portalTicketClient(req, res);
+  if (!client) return;
+  const result = await getMongoCollection('messages').updateOne({
+    id: String(req.params.messageId || ''),
+    $or: [{ user_id: String(client.id) }, { clientId: String(client.id) }, { client_id: String(client.id) }],
+  }, { $set: { hidden_for_client: true } });
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Chat message not found.' });
+  res.json({ ok: true, hidden: true });
+});
+
+function clientNotificationsFilter(clientId: string): Record<string, unknown> {
+  return { $or: [{ user_id: clientId }, { clientId }, { client_id: clientId }] };
+}
+
 apiRouter.all('/admin/notifications', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
   const notifCol = getMongoCollection('notifications');
   if (req.method === 'DELETE') {
-    await notifCol.deleteMany({});
-    return res.json({ ok: true });
+    const result = await notifCol.deleteMany({});
+    return res.json({ ok: true, deleted: result.deletedCount });
   }
-  const notifications = await notifCol.find();
-  res.json({ ok: true, notifications });
+  if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed.' });
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+  const filter = req.query.only_unread === '1' ? { read_at: null } : {};
+  const notifications = await notifCol.find(filter, { sort: { created_at: -1 }, limit });
+  const unreadCount = await notifCol.countDocuments({ read_at: null });
+  res.json({ ok: true, notifications, unread_count: unreadCount, has_more: notifications.length === limit });
 });
 
 apiRouter.post('/admin/notifications/send', async (req: Request, res: Response) => {
-  const notif = { ...req.body, id: `notif_${Date.now()}`, created_at: new Date().toISOString() };
-  await getMongoCollection('notifications').insertOne(notif);
-  res.json({ ok: true, notification: notif });
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const role = normalizeAdminRole(staff.role);
+  const message = String(req.body?.message || '').trim();
+  const userId = String(req.body?.user_id || '').trim();
+  const kind = String(req.body?.kind || 'info').trim();
+  const title = String(req.body?.title || 'Administrator Notice').trim();
+  const type = String(req.body?.type || 'support').trim();
+  if (role !== 'Super Admin') {
+    if (decodeStaffCapabilities(staff.capabilities).notifications === false) {
+      return res.status(403).json({ ok: false, error: 'Your account does not have notification access.' });
+    }
+    if (!userId) {
+      return res.status(403).json({ ok: false, error: 'Only Super Admins can notify all clients.' });
+    }
+  }
+  if (!message || message.length > 1000) {
+    return res.status(422).json({ ok: false, error: 'Message must be between 1 and 1000 characters.' });
+  }
+
+  const clients = getMongoCollection('clients');
+  const recipients = userId
+    ? await clients.find({ id: userId, ...clientDeletionFilter(undefined) })
+    : await clients.find(clientDeletionFilter(undefined));
+  if (userId && recipients.length === 0) {
+    return res.status(404).json({ ok: false, error: 'The selected client was not found.' });
+  }
+  if (role !== 'Super Admin' && !(await staffCanNotifyClient(staff, recipients[0]))) {
+    return res.status(403).json({ ok: false, error: 'You can only notify clients assigned to your role.' });
+  }
+  if (recipients.length === 0) return res.status(422).json({ ok: false, error: 'There are no active clients to notify.' });
+
+  const createdAt = new Date().toISOString();
+  const logId = `notif_log_${randomUUID()}`;
+  const notificationRows = recipients.map((client) => ({
+    id: `notif_${randomUUID()}`,
+    notification_log_id: logId,
+    user_id: String(client.id),
+    clientId: String(client.id),
+    kind,
+    title,
+    type,
+    message,
+    read: false,
+    read_at: null,
+    created_at: createdAt,
+  }));
+  await getMongoCollection('notifications').insertMany(notificationRows);
+
+  const selectedClient = userId ? recipients[0] : null;
+  const logEntry = {
+    id: logId,
+    kind,
+    message,
+    user_id: userId || null,
+    user_name: selectedClient ? String(selectedClient.name || selectedClient.company || '') : '',
+    user_email: selectedClient ? String(selectedClient.email || '') : '',
+    is_broadcast: userId ? 0 : 1,
+    recipient_count: recipients.length,
+    admin_id: String(staff.id || ''),
+    admin_name: String(staff.name || staff.full_name || staff.email || 'Administrator'),
+    created_at: createdAt,
+    recalled_at: null,
+    recalled_count: null,
+  };
+  await getMongoCollection('notification_sent_log').insertOne(logEntry);
+  res.json({ ok: true, sent: recipients.length, notification: notificationRows[0], log: logEntry });
 });
 
-apiRouter.post('/admin/notifications/read-all', async (_req: Request, res: Response) => {
-  await getMongoCollection('notifications').updateMany({}, { $set: { read: true } });
-  res.json({ ok: true });
+apiRouter.post('/admin/notifications/read-all', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('notifications').updateMany({ read_at: null }, {
+    $set: { read: true, read_at: new Date().toISOString() },
+  });
+  res.json({ ok: true, modified: result.modifiedCount });
 });
 
-apiRouter.delete('/admin/notifications/clear', async (_req: Request, res: Response) => {
-  await getMongoCollection('notifications').deleteMany({});
-  res.json({ ok: true });
+apiRouter.delete('/admin/notifications/clear', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('notifications').deleteMany({});
+  res.json({ ok: true, deleted: result.deletedCount });
 });
 
-apiRouter.delete('/admin/notifications/sent-log', async (_req: Request, res: Response) => {
-  await getMongoCollection('notifications').deleteMany({ sent: true });
-  res.json({ ok: true });
+apiRouter.get('/admin/notifications/sent-log', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const collection = getMongoCollection('notification_sent_log');
+  const [log, total] = await Promise.all([
+    collection.find({}, { sort: { created_at: -1 }, limit, skip: offset }),
+    collection.countDocuments({}),
+  ]);
+  res.json({ ok: true, log, total, limit, offset, has_more: offset + log.length < total });
 });
 
-apiRouter.all('/client/notifications', async (_req: Request, res: Response) => {
-  const notifications = await getMongoCollection('notifications').find();
+apiRouter.delete('/admin/notifications/sent-log', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('notification_sent_log').deleteMany({});
+  res.json({ ok: true, deleted: result.deletedCount });
+});
+
+apiRouter.delete('/admin/notifications/sent-log/:logId', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const collection = getMongoCollection('notification_sent_log');
+  const log = await collection.findOne({ id: String(req.params.logId || '') });
+  if (!log) return res.status(404).json({ ok: false, error: 'Sent notification was not found.' });
+  const now = new Date().toISOString();
+  const result = await getMongoCollection('notifications').deleteMany({
+    notification_log_id: log.id,
+    read_at: null,
+  });
+  await collection.updateOne({ id: log.id }, {
+    $set: { recalled_at: now, recalled_count: result.deletedCount },
+  });
+  res.json({ ok: true, recalled: result.deletedCount, already_read: Math.max(0, Number(log.recipient_count || 0) - result.deletedCount) });
+});
+
+apiRouter.post('/admin/users/:userId/notifications/delete', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id: unknown) => String(id)) : [];
+  if (!ids.length || ids.length > 500) {
+    return res.status(422).json({ ok: false, error: 'Select between 1 and 500 notifications to delete.' });
+  }
+  const result = await getMongoCollection('notifications').deleteMany({
+    $and: [clientNotificationsFilter(String(req.params.userId || '')), { id: { $in: ids } }],
+  });
+  res.json({ ok: true, deleted: result.deletedCount });
+});
+
+apiRouter.get('/admin/users/:userId/notifications', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const userId = String(req.params.userId || '');
+  const client = await getMongoCollection('clients').findOne({ id: userId });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client was not found.' });
+  const notifications = await getMongoCollection('notifications').find(
+    clientNotificationsFilter(userId),
+    { sort: { created_at: -1 }, limit: 500 }
+  );
   res.json({ ok: true, notifications });
+});
+
+apiRouter.delete('/admin/users/:userId/notifications/clear', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('notifications').deleteMany(
+    clientNotificationsFilter(String(req.params.userId || ''))
+  );
+  res.json({ ok: true, deleted: result.deletedCount });
+});
+
+apiRouter.post('/admin/notifications/:notificationId/read', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('notifications').updateOne(
+    { id: String(req.params.notificationId || '') },
+    { $set: { read: true, read_at: new Date().toISOString() } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Notification was not found.' });
+  res.json({ ok: true });
+});
+
+apiRouter.delete('/admin/notifications/:notificationId', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('notifications').deleteOne({ id: String(req.params.notificationId || '') });
+  if (!result.deletedCount) return res.status(404).json({ ok: false, error: 'Notification was not found.' });
+  res.json({ ok: true, deleted: result.deletedCount });
+});
+
+apiRouter.all('/client/notifications', async (req: Request, res: Response) => {
+  const client = await portalTicketClient(req, res);
+  if (!client) return;
+  const clientId = String(client.id);
+  const filter = clientNotificationsFilter(clientId);
+  const notifications = getMongoCollection('notifications');
+  if (req.method === 'POST') {
+    const id = String(req.body?.id || '');
+    if (!id) return res.status(400).json({ ok: false, error: 'Notification id is required.' });
+    const result = await notifications.updateOne(
+      { $and: [filter, { id }] },
+      { $set: { read: true, read_at: new Date().toISOString() } }
+    );
+    if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Notification was not found.' });
+    return res.json({ ok: true });
+  }
+  if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed.' });
+  const rows = await notifications.find(filter, { sort: { created_at: -1 }, limit: 500 });
+  res.json({ ok: true, notifications: rows });
 });
 
 // ---------------------------------------------------------------------------
@@ -1551,3 +2413,17 @@ apiRouter.all('/portal/signup-request', async (req: Request, res: Response) => {
   await getMongoCollection('signup_requests').insertOne({ ...req.body, created_at: new Date().toISOString() });
   res.json({ ok: true, message: 'Signup request registered in MongoDB.' });
 });
+
+for (const routerLayer of apiRouter.stack) {
+  if (!routerLayer.route) continue;
+  for (const routeLayer of routerLayer.route.stack) {
+    const handler = routeLayer.handle;
+    routeLayer.handle = (req, res, next) => {
+      try {
+        Promise.resolve(handler(req, res, next)).catch(next);
+      } catch (error) {
+        next(error);
+      }
+    };
+  }
+}

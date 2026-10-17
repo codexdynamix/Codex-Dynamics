@@ -103,11 +103,31 @@ class MongoService {
     }
 
     public static function updateOne(string $name, array $filter, array $updates): int {
+        return self::updateOneWithOptions($name, $filter, $updates);
+    }
+
+    public static function updateOneWithOptions(string $name, array $filter, array $updates, array $options = []): int {
         $result = self::$client
             ->selectDatabase(self::$databaseName)
             ->selectCollection($name)
-            ->updateOne($filter, ['$set' => $updates]);
+            ->updateOne($filter, ['$set' => $updates], $options);
         return $result->getMatchedCount();
+    }
+
+    public static function addToSetOne(string $name, array $filter, string $field, mixed $value): int {
+        $result = self::$client
+            ->selectDatabase(self::$databaseName)
+            ->selectCollection($name)
+            ->updateOne($filter, ['$addToSet' => [$field => $value]]);
+        return $result->getMatchedCount();
+    }
+
+    public static function updateMany(string $name, array $filter, array $updates): int {
+        $result = self::$client
+            ->selectDatabase(self::$databaseName)
+            ->selectCollection($name)
+            ->updateMany($filter, ['$set' => $updates]);
+        return $result->getModifiedCount();
     }
 
     public static function deleteOne(string $name, array $filter): int {
@@ -116,6 +136,14 @@ class MongoService {
             ->selectCollection($name)
             ->deleteOne($filter);
         return $result->getDeletedCount();
+    }
+
+    public static function deleteMany(string $name, array $filter): int {
+        return self::$client
+            ->selectDatabase(self::$databaseName)
+            ->selectCollection($name)
+            ->deleteMany($filter)
+            ->getDeletedCount();
     }
 
     public static function countDocuments(string $name, array $filter = []): int {
@@ -262,6 +290,30 @@ function portalMailSetSessionCookie(string $token): void {
     ]);
 }
 
+function adminSetSessionCookie(string $token): void {
+    $forwardedProto = strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $forwardedProto === 'https';
+    setcookie('cdx_admin_session', $token, [
+        'expires' => time() + 43200,
+        'path' => '/api/',
+        'secure' => $secure,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+function adminClearSessionCookie(): void {
+    $forwardedProto = strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $forwardedProto === 'https';
+    setcookie('cdx_admin_session', '', [
+        'expires' => time() - 3600,
+        'path' => '/api/',
+        'secure' => $secure,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
 function portalMailClientFromRequest(): array {
     $headers = function_exists('getallheaders') ? getallheaders() : [];
     $authorization = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? $headers['Authorization'] ?? $headers['authorization'] ?? '');
@@ -284,6 +336,73 @@ function portalMailClientFromRequest(): array {
         jsonOut(['ok' => false, 'error' => 'The client portal is disabled for this account.'], 403);
     }
     return $client;
+}
+
+function chatStaffFromRequest(): array {
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    $authorization = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? $headers['Authorization'] ?? $headers['authorization'] ?? '');
+    $token = trim((string)($_COOKIE['cdx_admin_session'] ?? ''));
+    if ($token === '' && preg_match('/^Bearer\s+(.+)$/i', trim($authorization), $bearerMatch)) {
+        $token = trim($bearerMatch[1]);
+    }
+    if (!preg_match('/^cdx_adm_(?:mongo|php_mongo)_(.+)_(\d{10,13})$/i', $token, $match)) {
+        jsonOut(['ok' => false, 'error' => 'A valid staff session is required.'], 401);
+    }
+    $issuedAt = (int)$match[2];
+    if (strlen($match[2]) === 13) $issuedAt = (int)floor($issuedAt / 1000);
+    if ($issuedAt > time() + 60 || time() - $issuedAt > 43200) {
+        jsonOut(['ok' => false, 'error' => 'The staff session has expired. Sign in again.'], 401);
+    }
+    $staff = MongoService::findOne('staff_users', ['id' => $match[1]]);
+    if (!$staff || ($staff['status'] ?? '') === 'Suspended' || !empty($staff['deleted_at']) || ($staff['is_bin'] ?? false) === true) {
+        jsonOut(['ok' => false, 'error' => 'The staff account is unavailable.'], 401);
+    }
+    return $staff;
+}
+
+function notificationStaffCanNotifyClient(array $staff, array $client): bool {
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+    $agentId = (string)($client['assignedToAgent'] ?? $client['assigned_agent_id'] ?? $client['agentId'] ?? $client['agent_id'] ?? '');
+    $agent = $agentId !== '' ? MongoService::findOne('staff_users', ['id' => $agentId]) : null;
+    $teamId = (string)($client['assignedToTeam'] ?? $client['assigned_team_id'] ?? $client['teamId'] ?? $client['team_id'] ?? $agent['teamId'] ?? $agent['team_id'] ?? '');
+    $team = $teamId !== '' ? MongoService::findOne('teams', ['id' => $teamId]) : null;
+    $clientOfficeId = (string)($client['assignedToOffice'] ?? $client['assigned_office_id'] ?? $client['officeId'] ?? $client['office_id'] ?? $agent['officeId'] ?? $agent['office_id'] ?? $team['officeId'] ?? $team['office_id'] ?? '');
+    if ($role === 'officemanager') {
+        $officeId = (string)($staff['officeId'] ?? $staff['office_id'] ?? '');
+        return $officeId !== '' && $clientOfficeId === $officeId;
+    }
+    if ($role === 'teamleader') {
+        $staffTeamId = (string)($staff['teamId'] ?? $staff['team_id'] ?? '');
+        $clientTeamLeaderId = (string)($client['assignedToTeamLeader'] ?? $client['assigned_team_leader_id'] ?? '');
+        return ($staffTeamId !== '' && $teamId === $staffTeamId)
+            || ($clientTeamLeaderId !== '' && $clientTeamLeaderId === (string)($staff['id'] ?? ''));
+    }
+    if ($role === 'agent') {
+        return $agentId !== '' && $agentId === (string)($staff['id'] ?? '');
+    }
+    return false;
+}
+
+function chatMessageFilter(string $clientId): array {
+    return ['$or' => [
+        ['user_id' => $clientId],
+        ['clientId' => $clientId],
+        ['client_id' => $clientId],
+    ]];
+}
+
+function notificationClientFilter(string $clientId): array {
+    return ['$or' => [
+        ['user_id' => $clientId],
+        ['clientId' => $clientId],
+        ['client_id' => $clientId],
+    ]];
+}
+
+function chatPresenceIsFresh(mixed $timestamp, int $seconds): bool {
+    if (!is_string($timestamp) || $timestamp === '') return false;
+    $time = strtotime($timestamp);
+    return $time !== false && time() - $time <= $seconds && time() - $time >= -60;
 }
 
 function hostingerMailEnabledAssignment(string $clientId, string $resourceId): array {
@@ -450,6 +569,7 @@ if ($path === '/admin/login' && $method === 'POST') {
         jsonOut(['ok' => false, 'error' => 'Invalid staff email or password.'], 401);
     }
     $token = 'cdx_adm_php_mongo_' . $staff['id'] . '_' . time();
+    adminSetSessionCookie($token);
     jsonOut([
         'ok' => true,
         'token' => $token,
@@ -476,10 +596,87 @@ if ($path === '/admin/me') {
 }
 
 if ($path === '/admin/logout') {
+    adminClearSessionCookie();
     jsonOut(['ok' => true]);
 }
 
 // 3. Admin Clients
+function clientAssignmentUpdates(array $source): array {
+    $aliases = [
+        'assignedToOffice' => ['assigned_office_id', 'assignedToOffice', 'officeId'],
+        'assignedToTeam' => ['assigned_team_id', 'assignedToTeam', 'teamId'],
+        'assignedToTeamLeader' => ['assigned_team_leader_id', 'assignedToTeamLeader', 'teamLeaderId'],
+        'assignedToAgent' => ['assigned_agent_id', 'assignedToAgent', 'agentId'],
+    ];
+    $updates = [];
+    foreach ($aliases as $field => $keys) {
+        foreach ($keys as $key) {
+            if (!array_key_exists($key, $source)) continue;
+            $value = $source[$key];
+            if ($value !== null && !is_string($value)) {
+                jsonOut(['ok' => false, 'error' => "Invalid {$key} assignment value."], 422);
+            }
+            $value = is_string($value) ? trim($value) : null;
+            $updates[$field] = $value === '' ? null : $value;
+            break;
+        }
+    }
+    return $updates;
+}
+
+if (preg_match('#^/admin/clients/([^/]+)/assign$#', $path, $matches) && $method === 'POST') {
+    $clientId = rawurldecode($matches[1]);
+    $client = MongoService::findOne('clients', ['id' => $clientId]);
+    if ($client === null) jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+    $updates = clientAssignmentUpdates($body);
+    if (!$updates) jsonOut(['ok' => false, 'error' => 'At least one client assignment field is required.'], 422);
+    MongoService::updateOne('clients', ['id' => $clientId], $updates);
+    jsonOut(['ok' => true, 'client' => MongoService::findOne('clients', ['id' => $clientId])]);
+}
+
+if ($path === '/admin/clients/assign-bulk' && $method === 'POST') {
+    if (isset($body['assignments']) && is_array($body['assignments'])) {
+        $rawAssignments = $body['assignments'];
+    } else {
+        $clientIds = $body['client_ids'] ?? $body['clientIds'] ?? [];
+        if (!is_array($clientIds)) {
+            jsonOut(['ok' => false, 'error' => 'Client IDs must be an array.'], 422);
+        }
+        $rawAssignments = array_map(
+            static fn($clientId) => ['client_id' => $clientId] + $body,
+            $clientIds
+        );
+    }
+    if (!$rawAssignments) jsonOut(['ok' => false, 'error' => 'At least one client assignment is required.'], 422);
+
+    $assignments = [];
+    foreach ($rawAssignments as $entry) {
+        if (!is_array($entry)) {
+            jsonOut(['ok' => false, 'error' => 'Each client assignment must be an object.'], 422);
+        }
+        $clientId = trim((string)($entry['client_id'] ?? $entry['clientId'] ?? ''));
+        if ($clientId === '') jsonOut(['ok' => false, 'error' => 'Each client assignment must include a client ID.'], 422);
+        $updates = clientAssignmentUpdates($entry);
+        if (!$updates) jsonOut(['ok' => false, 'error' => "Assignment for client {$clientId} has no supported fields."], 422);
+        $assignments[$clientId] = $updates;
+    }
+
+    $existingClients = [];
+    foreach (array_keys($assignments) as $clientId) {
+        $client = MongoService::findOne('clients', ['id' => $clientId]);
+        if ($client === null) jsonOut(['ok' => false, 'error' => "Client not found: {$clientId}."], 404);
+        $existingClients[$clientId] = $client;
+    }
+    foreach ($assignments as $clientId => $updates) {
+        MongoService::updateOne('clients', ['id' => $clientId], $updates);
+    }
+    $updatedClients = [];
+    foreach (array_keys($assignments) as $clientId) {
+        $updatedClients[] = MongoService::findOne('clients', ['id' => $clientId]);
+    }
+    jsonOut(['ok' => true, 'clients' => $updatedClients]);
+}
+
 if ($path === '/admin/clients' && $method === 'GET') {
     $includeDeleted = (string)($_GET['include_deleted'] ?? '');
     if ($includeDeleted === '1') {
@@ -1481,22 +1678,480 @@ if ($path === '/portal/change-password' && $method === 'POST') {
     jsonOut(['ok' => true, 'message' => 'Portal password updated in MongoDB.']);
 }
 
+if ($path === '/admin/notifications/send' && $method === 'POST') {
+    $staff = chatStaffFromRequest();
+    $message = trim((string)($body['message'] ?? ''));
+    $userId = trim((string)($body['user_id'] ?? ''));
+    $kind = trim((string)($body['kind'] ?? 'info'));
+    $title = trim((string)($body['title'] ?? 'Administrator Notice'));
+    $type = trim((string)($body['type'] ?? 'support'));
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+    $isSuperAdmin = $role === 'superadmin';
+    if (!$isSuperAdmin) {
+        $capabilities = $staff['capabilities'] ?? [];
+        if (is_string($capabilities)) $capabilities = json_decode($capabilities, true) ?: [];
+        if (is_array($capabilities) && array_key_exists('notifications', $capabilities) && $capabilities['notifications'] === false) {
+            jsonOut(['ok' => false, 'error' => 'Your account does not have notification access.'], 403);
+        }
+        if ($userId === '') {
+            jsonOut(['ok' => false, 'error' => 'Only Super Admins can notify all clients.'], 403);
+        }
+    }
+    if ($message === '' || strlen($message) > 1000) {
+        jsonOut(['ok' => false, 'error' => 'Message must be between 1 and 1000 characters.'], 422);
+    }
+
+    $clients = MongoService::getCollection('clients', $userId !== '' ? ['id' => $userId] : [], 10000);
+    $recipients = array_values(array_filter($clients, static function ($client) {
+        return empty($client['is_bin']) && empty($client['deleted_at']) && ($client['status'] ?? '') !== 'Suspended';
+    }));
+    if ($userId !== '' && count($recipients) === 0) {
+        jsonOut(['ok' => false, 'error' => 'The selected client was not found.'], 404);
+    }
+    if (count($recipients) === 0) {
+        jsonOut(['ok' => false, 'error' => 'There are no active clients to notify.'], 422);
+    }
+    if (!$isSuperAdmin && !notificationStaffCanNotifyClient($staff, $recipients[0])) {
+        jsonOut(['ok' => false, 'error' => 'You can only notify clients assigned to your role.'], 403);
+    }
+
+    $createdAt = date('c');
+    $logId = 'notif_log_' . bin2hex(random_bytes(16));
+    $firstNotification = null;
+    foreach ($recipients as $recipient) {
+        $clientId = (string)($recipient['id'] ?? '');
+        if ($clientId === '') continue;
+        $notification = MongoService::insert('notifications', [
+            'id' => 'notif_' . bin2hex(random_bytes(16)),
+            'notification_log_id' => $logId,
+            'user_id' => $clientId,
+            'clientId' => $clientId,
+            'kind' => $kind,
+            'title' => $title,
+            'type' => $type,
+            'message' => $message,
+            'read' => false,
+            'read_at' => null,
+            'created_at' => $createdAt,
+        ]);
+        $firstNotification = $firstNotification ?? $notification;
+    }
+    $sent = count($recipients);
+    $selectedClient = $userId !== '' ? $recipients[0] : [];
+    $log = MongoService::insert('notification_sent_log', [
+        'id' => $logId,
+        'kind' => $kind,
+        'message' => $message,
+        'user_id' => $userId !== '' ? $userId : null,
+        'user_name' => (string)($selectedClient['name'] ?? $selectedClient['company'] ?? ''),
+        'user_email' => (string)($selectedClient['email'] ?? ''),
+        'is_broadcast' => $userId !== '' ? 0 : 1,
+        'recipient_count' => $sent,
+        'admin_id' => (string)($staff['id'] ?? ''),
+        'admin_name' => (string)($staff['name'] ?? $staff['full_name'] ?? $staff['email'] ?? 'Administrator'),
+        'created_at' => $createdAt,
+        'recalled_at' => null,
+        'recalled_count' => null,
+    ]);
+    jsonOut(['ok' => true, 'sent' => $sent, 'notification' => $firstNotification, 'log' => $log]);
+}
+
+if ($path === '/admin/notifications/sent-log' && $method === 'GET') {
+    chatStaffFromRequest();
+    $limit = min(100, max(1, (int)($_GET['limit'] ?? 50)));
+    $offset = max(0, (int)($_GET['offset'] ?? 0));
+    $total = MongoService::countDocuments('notification_sent_log');
+    $log = MongoService::getCollection('notification_sent_log', [], $limit, $offset, ['created_at' => -1]);
+    jsonOut([
+        'ok' => true,
+        'log' => $log,
+        'total' => $total,
+        'limit' => $limit,
+        'offset' => $offset,
+        'has_more' => $offset + count($log) < $total,
+    ]);
+}
+
+if ($path === '/admin/notifications/sent-log' && $method === 'DELETE') {
+    chatStaffFromRequest();
+    jsonOut(['ok' => true, 'deleted' => MongoService::deleteMany('notification_sent_log', [])]);
+}
+
+if (preg_match('#^/admin/notifications/sent-log/([^/]+)$#', $path, $sentLogMatch) && $method === 'DELETE') {
+    chatStaffFromRequest();
+    $logId = rawurldecode($sentLogMatch[1]);
+    $log = MongoService::findOne('notification_sent_log', ['id' => $logId]);
+    if (!$log) jsonOut(['ok' => false, 'error' => 'Sent notification was not found.'], 404);
+    $recalled = MongoService::deleteMany('notifications', [
+        'notification_log_id' => $logId,
+        'read_at' => null,
+    ]);
+    $now = date('c');
+    MongoService::updateOne('notification_sent_log', ['id' => $logId], [
+        'recalled_at' => $now,
+        'recalled_count' => $recalled,
+    ]);
+    jsonOut([
+        'ok' => true,
+        'recalled' => $recalled,
+        'already_read' => max(0, (int)($log['recipient_count'] ?? 0) - $recalled),
+    ]);
+}
+
+if (preg_match('#^/admin/users/([^/]+)/notifications(?:/(clear|delete))?$#', $path, $userNotificationsMatch)) {
+    chatStaffFromRequest();
+    $clientId = rawurldecode($userNotificationsMatch[1]);
+    $action = $userNotificationsMatch[2] ?? '';
+    $filter = notificationClientFilter($clientId);
+    if ($action === '' && $method === 'GET') {
+        if (!MongoService::findOne('clients', ['id' => $clientId])) {
+            jsonOut(['ok' => false, 'error' => 'Client was not found.'], 404);
+        }
+        jsonOut(['ok' => true, 'notifications' => MongoService::getCollection('notifications', $filter, 500, 0, ['created_at' => -1])]);
+    }
+    if ($action === 'clear' && $method === 'DELETE') {
+        jsonOut(['ok' => true, 'deleted' => MongoService::deleteMany('notifications', $filter)]);
+    }
+    if ($action === 'delete' && $method === 'POST') {
+        $ids = $body['ids'] ?? [];
+        if (!is_array($ids) || count($ids) < 1 || count($ids) > 500) {
+            jsonOut(['ok' => false, 'error' => 'Select between 1 and 500 notifications to delete.'], 422);
+        }
+        jsonOut(['ok' => true, 'deleted' => MongoService::deleteMany('notifications', [
+            '$and' => [$filter, ['id' => ['$in' => array_map('strval', $ids)]]],
+        ])]);
+    }
+    jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+}
+
+if (preg_match('#^/admin/notifications/([^/]+)/read$#', $path, $readNotificationMatch) && $method === 'POST') {
+    chatStaffFromRequest();
+    $id = rawurldecode($readNotificationMatch[1]);
+    if (!MongoService::updateOne('notifications', ['id' => $id], ['read' => true, 'read_at' => date('c')])) {
+        jsonOut(['ok' => false, 'error' => 'Notification was not found.'], 404);
+    }
+    jsonOut(['ok' => true]);
+}
+
+if (preg_match('#^/admin/notifications/([^/]+)$#', $path, $deleteNotificationMatch) && $method === 'DELETE') {
+    chatStaffFromRequest();
+    $deleted = MongoService::deleteOne('notifications', ['id' => rawurldecode($deleteNotificationMatch[1])]);
+    if (!$deleted) jsonOut(['ok' => false, 'error' => 'Notification was not found.'], 404);
+    jsonOut(['ok' => true, 'deleted' => $deleted]);
+}
+
 if ($path === '/admin/notifications') {
+    chatStaffFromRequest();
     if ($method === 'DELETE') {
+        jsonOut(['ok' => true, 'deleted' => MongoService::deleteMany('notifications', [])]);
+    }
+    if ($method !== 'GET') jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    $limit = min(200, max(1, (int)($_GET['limit'] ?? 50)));
+    $filter = ($_GET['only_unread'] ?? '') === '1' ? ['read_at' => null] : [];
+    $notifs = MongoService::getCollection('notifications', $filter, $limit, 0, ['created_at' => -1]);
+    jsonOut([
+        'ok' => true,
+        'notifications' => $notifs,
+        'unread_count' => MongoService::countDocuments('notifications', ['read_at' => null]),
+        'has_more' => count($notifs) === $limit,
+    ]);
+}
+
+if ($path === '/admin/notifications/read-all' && $method === 'POST') {
+    chatStaffFromRequest();
+    $modified = MongoService::updateMany('notifications', ['read_at' => null], ['read' => true, 'read_at' => date('c')]);
+    jsonOut(['ok' => true, 'modified' => $modified]);
+}
+
+if ($path === '/admin/notifications/clear' && $method === 'DELETE') {
+    chatStaffFromRequest();
+    jsonOut(['ok' => true, 'deleted' => MongoService::deleteMany('notifications', [])]);
+}
+
+if ($path === '/client/notifications') {
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    $filter = notificationClientFilter($clientId);
+    if ($method === 'POST') {
+        $id = trim((string)($body['id'] ?? ''));
+        if ($id === '') jsonOut(['ok' => false, 'error' => 'Notification id is required.'], 400);
+        if (!MongoService::updateOne('notifications', ['$and' => [$filter, ['id' => $id]]], ['read' => true, 'read_at' => date('c')])) {
+            jsonOut(['ok' => false, 'error' => 'Notification was not found.'], 404);
+        }
         jsonOut(['ok' => true]);
     }
-    $notifs = MongoService::getCollection('notifications');
-    jsonOut(['ok' => true, 'notifications' => $notifs]);
+    if ($method !== 'GET') jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    jsonOut(['ok' => true, 'notifications' => MongoService::getCollection('notifications', $filter, 500, 0, ['created_at' => -1])]);
 }
 
 if ($path === '/admin/messages') {
-    $msgs = MongoService::getCollection('messages');
-    jsonOut(['ok' => true, 'messages' => $msgs]);
+    $staff = chatStaffFromRequest();
+    if ($method === 'POST') {
+        $clientId = trim((string)($body['user_id'] ?? ''));
+        $text = trim((string)($body['body'] ?? ''));
+        if ($clientId === '' || $text === '' || strlen($text) > 5000) {
+            jsonOut(['ok' => false, 'error' => 'A client and a message of 1 to 5000 characters are required.'], 422);
+        }
+        $senderName = trim((string)($body['sender_name'] ?? ''));
+        $message = MongoService::insert('messages', [
+            'user_id' => $clientId,
+            'sender' => 'agent',
+            'sender_id' => (string)($staff['id'] ?? ''),
+            'sender_name' => substr($senderName !== '' ? $senderName : (string)($staff['name'] ?? 'Codex Dynamics Support'), 0, 120),
+            'body' => $text,
+            'read' => false,
+        ]);
+        jsonOut(['ok' => true, 'message' => $message]);
+    }
+    if ($method === 'DELETE') {
+        $clientId = trim((string)($_GET['user_id'] ?? ''));
+        if ($clientId === '') jsonOut(['ok' => false, 'error' => 'user_id is required to clear a chat.'], 400);
+        jsonOut(['ok' => true, 'deletedCount' => MongoService::deleteMany('messages', chatMessageFilter($clientId))]);
+    }
+    if ($method !== 'GET') jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    $clientId = trim((string)($_GET['user_id'] ?? ''));
+    $filter = [
+        '$and' => array_values(array_filter([
+            $clientId !== '' ? chatMessageFilter($clientId) : null,
+            ['hidden_for_staff' => ['$ne' => (string)($staff['id'] ?? '')]],
+        ])),
+    ];
+    $limit = max(1, min(500, (int)($_GET['limit'] ?? 100)));
+    $messages = MongoService::getCollection('messages', $filter, $limit, 0, ['created_at' => -1]);
+    $messages = array_reverse($messages);
+    $client = $clientId !== '' ? MongoService::findOne('clients', ['id' => $clientId]) : null;
+    $user = $client ? array_intersect_key($client, array_flip(['id', 'name', 'email', 'company'])) : null;
+    $unreadCount = $clientId !== ''
+        ? MongoService::countDocuments('messages', chatMessageFilter($clientId) + ['sender' => 'client', 'read' => ['$ne' => true]])
+        : 0;
+    jsonOut([
+        'ok' => true,
+        'user' => $user,
+        'messages' => $messages,
+        'unread_count' => $unreadCount,
+        'has_more' => count($messages) === $limit,
+    ]);
+}
+
+if (preg_match('#^/admin/messages/([^/]+)$#', $path, $chatMatch) && $method === 'DELETE') {
+    $staff = chatStaffFromRequest();
+    $clientId = trim((string)($_GET['user_id'] ?? ''));
+    if ($clientId === '') jsonOut(['ok' => false, 'error' => 'user_id is required.'], 400);
+    $filter = ['id' => rawurldecode($chatMatch[1])];
+    $filter['$and'] = [chatMessageFilter($clientId)];
+    if (($_GET['mode'] ?? '') === 'me') {
+        $matched = MongoService::addToSetOne('messages', $filter, 'hidden_for_staff', (string)($staff['id'] ?? ''));
+        if (!$matched) jsonOut(['ok' => false, 'error' => 'Chat message not found.'], 404);
+        jsonOut(['ok' => true, 'hidden' => true]);
+    }
+    $deleted = MongoService::deleteOne('messages', $filter);
+    if (!$deleted) jsonOut(['ok' => false, 'error' => 'Chat message not found.'], 404);
+    jsonOut(['ok' => true, 'deletedCount' => $deleted]);
+}
+
+if ($path === '/admin/messages/read' && $method === 'POST') {
+    chatStaffFromRequest();
+    $clientId = trim((string)($body['user_id'] ?? $body['clientId'] ?? ''));
+    if ($clientId === '') jsonOut(['ok' => false, 'error' => 'user_id is required.'], 400);
+    $now = date('c');
+    $modified = MongoService::updateMany('messages', chatMessageFilter($clientId) + ['sender' => 'client'], [
+        'read' => true,
+        'read_at' => $now,
+    ]);
+    jsonOut(['ok' => true, 'marked' => $modified]);
+}
+
+if ($path === '/admin/messages/unread_counts' && $method === 'GET') {
+    chatStaffFromRequest();
+    $unreadMessages = MongoService::getCollection('messages', ['read' => ['$ne' => true], 'sender' => 'client'], 5000);
+    $counts = [];
+    foreach ($unreadMessages as $message) {
+        $clientId = (string)($message['user_id'] ?? $message['clientId'] ?? $message['client_id'] ?? '');
+        if ($clientId !== '') $counts[$clientId] = ($counts[$clientId] ?? 0) + 1;
+    }
+    $total = array_sum($counts);
+    jsonOut(['ok' => true, 'counts' => $counts, 'total' => $total, 'unreadCount' => $total]);
+}
+
+if ($path === '/admin/messages/threads' && $method === 'GET') {
+    $staff = chatStaffFromRequest();
+    $filter = ['hidden_for_staff' => ['$ne' => (string)($staff['id'] ?? '')]];
+    jsonOut(['ok' => true, 'threads' => MongoService::getCollection('messages', $filter, 5000, 0, ['created_at' => 1])]);
+}
+
+if (preg_match('#^/admin/messages/presence$#', $path)) {
+    chatStaffFromRequest();
+    $clientId = trim((string)($_GET['user_id'] ?? $body['user_id'] ?? ''));
+    if ($clientId === '') jsonOut(['ok' => false, 'error' => 'user_id is required.'], 400);
+    $presenceId = 'chat_presence_' . $clientId;
+    $now = date('c');
+    $updates = ['id' => $presenceId, 'clientId' => $clientId, 'staff_online_at' => $now];
+    if ($method === 'POST') {
+        $typing = (bool)($body['is_typing'] ?? false);
+        $updates['staff_typing'] = $typing;
+        $updates['staff_typing_at'] = $typing ? $now : null;
+    } elseif ($method !== 'GET') {
+        jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    }
+    MongoService::updateOneWithOptions('client_chat_presence', ['id' => $presenceId], $updates, ['upsert' => true]);
+    $presence = MongoService::findOne('client_chat_presence', ['id' => $presenceId]) ?? [];
+    jsonOut(['ok' => true, 'presence' => [
+        'client_online' => chatPresenceIsFresh($presence['client_online_at'] ?? null, 30),
+        'client_typing' => (bool)($presence['client_typing'] ?? false) && chatPresenceIsFresh($presence['client_typing_at'] ?? null, 8),
+        'staff_online' => chatPresenceIsFresh($presence['staff_online_at'] ?? null, 30),
+        'staff_typing' => (bool)($presence['staff_typing'] ?? false) && chatPresenceIsFresh($presence['staff_typing_at'] ?? null, 8),
+    ]]);
+}
+
+if ($path === '/portal/messages/presence') {
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    $presenceId = 'chat_presence_' . $clientId;
+    $now = date('c');
+    $updates = ['id' => $presenceId, 'clientId' => $clientId, 'client_online_at' => $now];
+    if ($method === 'POST') {
+        $typing = (bool)($body['is_typing'] ?? false);
+        $updates['client_typing'] = $typing;
+        $updates['client_typing_at'] = $typing ? $now : null;
+    } elseif ($method !== 'GET') {
+        jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    }
+    MongoService::updateOneWithOptions('client_chat_presence', ['id' => $presenceId], $updates, ['upsert' => true]);
+    $presence = MongoService::findOne('client_chat_presence', ['id' => $presenceId]) ?? [];
+    jsonOut(['ok' => true, 'presence' => [
+        'staff_online' => chatPresenceIsFresh($presence['staff_online_at'] ?? null, 30),
+        'staff_typing' => (bool)($presence['staff_typing'] ?? false) && chatPresenceIsFresh($presence['staff_typing_at'] ?? null, 8),
+        'client_online' => true,
+    ]]);
+}
+
+if ($path === '/client/messages') {
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    if ($method === 'POST') {
+        $text = trim((string)($body['body'] ?? ''));
+        if ($text === '' || strlen($text) > 5000) jsonOut(['ok' => false, 'error' => 'Message must be between 1 and 5000 characters.'], 422);
+        $clientName = trim((string)($client['name'] ?? ''));
+        if ($clientName === '') $clientName = trim((string)($client['company'] ?? '')) ?: 'Client';
+        $message = MongoService::insert('messages', [
+            'user_id' => $clientId,
+            'sender' => 'client',
+            'sender_id' => $clientId,
+            'sender_name' => $clientName,
+            'body' => $text,
+            'read' => false,
+        ]);
+        jsonOut(['ok' => true, 'message' => $message]);
+    }
+    if ($method === 'DELETE') {
+        jsonOut(['ok' => true, 'hiddenCount' => MongoService::updateMany('messages', chatMessageFilter($clientId), ['hidden_for_client' => true])]);
+    }
+    if ($method !== 'GET') jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    $requestedId = trim((string)($_GET['user_id'] ?? $clientId));
+    if ($requestedId !== $clientId) jsonOut(['ok' => false, 'error' => 'You cannot access another client’s chat.'], 403);
+    jsonOut(['ok' => true, 'messages' => MongoService::getCollection('messages', [
+        '$and' => [
+            chatMessageFilter($clientId),
+            ['hidden_for_client' => ['$ne' => true]],
+        ],
+    ], 2000, 0, ['created_at' => 1])]);
+}
+
+if (preg_match('#^/client/messages/([^/]+)$#', $path, $chatMatch)) {
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    $messageFilter = [
+        'id' => rawurldecode($chatMatch[1]),
+        'sender' => 'client',
+        '$and' => [chatMessageFilter($clientId)],
+    ];
+    if ($method === 'DELETE') {
+        unset($messageFilter['sender']);
+        $hidden = MongoService::updateOne('messages', $messageFilter, ['hidden_for_client' => true]);
+        if (!$hidden && !MongoService::findOne('messages', $messageFilter + ['hidden_for_client' => true])) {
+            jsonOut(['ok' => false, 'error' => 'Chat message not found.'], 404);
+        }
+        jsonOut(['ok' => true, 'hidden' => true]);
+    }
+    if ($method === 'PATCH') {
+        $text = trim((string)($body['body'] ?? ''));
+        if ($text === '' || strlen($text) > 5000) jsonOut(['ok' => false, 'error' => 'Message must be between 1 and 5000 characters.'], 422);
+        $message = MongoService::findOne('messages', $messageFilter);
+        if (!$message) jsonOut(['ok' => false, 'error' => 'Chat message not found.'], 404);
+        $createdAt = strtotime((string)($message['created_at'] ?? ''));
+        if ($createdAt === false || time() - $createdAt > 420) jsonOut(['ok' => false, 'error' => 'Messages can only be edited for seven minutes after sending.'], 403);
+        $editedAt = date('c');
+        MongoService::updateOne('messages', $messageFilter, ['body' => $text, 'edited_at' => $editedAt]);
+        $message['body'] = $text;
+        $message['edited_at'] = $editedAt;
+        jsonOut(['ok' => true, 'message' => $message]);
+    }
+    jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
 }
 
 if ($path === '/admin/audit') {
     $logs = MongoService::getCollection('audit_logs');
     jsonOut(['ok' => true, 'logs' => $logs]);
+}
+
+if (preg_match('#^/admin/hostinger/mailboxes/([^/]+)/send-to-client$#', $path, $sendMailMatch) && $method === 'POST') {
+    $staff = chatStaffFromRequest();
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+    if ($role !== 'superadmin') {
+        jsonOut(['ok' => false, 'error' => 'Only Super Admins can send email from the admin mail workspace.'], 403);
+    }
+    $resourceId = rawurldecode($sendMailMatch[1]);
+    $subject = trim((string)($body['subject'] ?? ''));
+    $text = trim((string)($body['text'] ?? ''));
+    if ($resourceId === '') {
+        jsonOut(['ok' => false, 'error' => 'A sender mailbox is required.'], 400);
+    }
+    if ($subject === '' || strlen($subject) > 200) {
+        jsonOut(['ok' => false, 'error' => 'Subject must be between 1 and 200 characters.'], 422);
+    }
+    if ($text === '' || strlen($text) > 20000) {
+        jsonOut(['ok' => false, 'error' => 'Message must be between 1 and 20000 characters.'], 422);
+    }
+    $integration = hostingerMailIntegration();
+    $token = trim((string)($integration['token'] ?? ''));
+    if ($token === '') {
+        jsonOut(['ok' => false, 'error' => 'Hostinger Mail is not configured. Save a valid token first.'], 503);
+    }
+    $providerMailboxes = hostingerMailMailboxList($integration);
+    $mailbox = null;
+    foreach ($providerMailboxes as $providerMailbox) {
+        if ((string)($providerMailbox['resourceId'] ?? '') === $resourceId) {
+            $mailbox = $providerMailbox;
+            break;
+        }
+    }
+    if ($mailbox === null) {
+        jsonOut(['ok' => false, 'error' => 'The sender mailbox was not found in the connected Hostinger account.'], 404);
+    }
+    $assignment = MongoService::findOne('client_mailboxes', [
+        'providerMailboxId' => $resourceId,
+    ]);
+    $enabled = $assignment['enabled'] ?? false;
+    if (!$assignment || !($enabled === true || $enabled === 1 || $enabled === '1')) {
+        jsonOut(['ok' => false, 'error' => 'This mailbox is not actively assigned to a client.'], 409);
+    }
+    $client = MongoService::findOne('clients', ['id' => (string)($assignment['clientId'] ?? '')]);
+    $recipient = trim((string)($client['email'] ?? ''));
+    if ($recipient === '' || filter_var($recipient, FILTER_VALIDATE_EMAIL) === false) {
+        jsonOut(['ok' => false, 'error' => 'The assigned client does not have a valid email address.'], 422);
+    }
+    hostingerMailApiRequestMethod(
+        $token,
+        '/api/v1/mailboxes/' . rawurlencode($resourceId) . '/send',
+        'POST',
+        ['to' => [$recipient], 'subject' => $subject, 'text' => $text]
+    );
+    jsonOut([
+        'ok' => true,
+        'sent' => true,
+        'from' => (string)($mailbox['address'] ?? ''),
+        'to' => $recipient,
+    ]);
 }
 
 if ($path === '/portal/mailboxes' && $method === 'GET') {

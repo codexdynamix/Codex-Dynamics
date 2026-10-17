@@ -140,16 +140,11 @@ export function BlogEditorPage({
     "edge computing",
   ]);
   const [secKeywordInput, setSecKeywordInput] = useState("");
-  const [seoTitle, setSeoTitle] = useState(
-    initialBlog?.title || "Architectural Teardown: High-Performance Systems"
-  );
-  const [seoDescription, setSeoDescription] = useState(
-    initialBlog?.excerpt ||
-      "Discover core principles for deploying zero-latency, edge-optimized enterprise web applications with Codex Dynamics."
-  );
+  const [seoTitle, setSeoTitle] = useState(initialBlog?.meta_title || "");
+  const [seoDescription, setSeoDescription] = useState(initialBlog?.meta_description || "");
   const [canonicalUrl, setCanonicalUrl] = useState(
     initialBlog?.slug
-      ? `https://codexdynamics.com/blog/${initialBlog.slug}`
+      ? `https://codexdynamics.com/blog?slug=${encodeURIComponent(initialBlog.slug)}`
       : ""
   );
   const [schemaType, setSchemaType] = useState<
@@ -264,7 +259,7 @@ export function BlogEditorPage({
       .replace(/(^-|-$)/g, "");
     setSlug(generated);
     if (!canonicalUrl) {
-      setCanonicalUrl(`https://codexdynamics.com/blog/${generated}`);
+      setCanonicalUrl(`https://codexdynamics.com/blog?slug=${encodeURIComponent(generated)}`);
     }
   };
 
@@ -272,12 +267,14 @@ export function BlogEditorPage({
   const rankMathChecks = useMemo(() => {
     const kw = focusKeyword.trim().toLowerCase();
     const hasKw = Boolean(kw);
-    const inTitle = hasKw && title.toLowerCase().includes(kw);
-    const inDesc = hasKw && (seoDescription || excerpt).toLowerCase().includes(kw);
+    const seoTitleText = seoTitle.trim() || title;
+    const seoDescriptionText = seoDescription.trim() || excerpt;
+    const inTitle = hasKw && seoTitleText.toLowerCase().includes(kw);
+    const inDesc = hasKw && seoDescriptionText.toLowerCase().includes(kw);
     const inContent = hasKw && content.toLowerCase().includes(kw);
     const inSlug = hasKw && slug.toLowerCase().includes(kw.replace(/\s+/g, "-"));
-    const titleLengthOk = title.length >= 40 && title.length <= 65;
-    const descLengthOk = (seoDescription || excerpt).length >= 120 && (seoDescription || excerpt).length <= 160;
+    const titleLengthOk = seoTitleText.length >= 40 && seoTitleText.length <= 65;
+    const descLengthOk = seoDescriptionText.length >= 120 && seoDescriptionText.length <= 160;
     const hasHeadings = /^#{2,4}\s/m.test(content);
     const hasPowerWord = powerWordsAnalysis.headlineHasPowerWord;
     const hasNumber = /\d+/.test(title);
@@ -317,14 +314,14 @@ export function BlogEditorPage({
         label: "Title is within optimal length (40–65 characters)",
         passed: titleLengthOk,
         weight: 10,
-        tip: `Current title length is ${title.length} characters.`,
+        tip: `Current title length is ${seoTitleText.length} characters.`,
       },
       {
         id: "desc-len",
         label: "Meta description length is optimal (120–160 characters)",
         passed: descLengthOk,
         weight: 8,
-        tip: `Current description is ${(seoDescription || excerpt).length} characters.`,
+        tip: `Current description is ${seoDescriptionText.length} characters.`,
       },
       {
         id: "power-word",
@@ -359,7 +356,7 @@ export function BlogEditorPage({
     const score = list.reduce((acc, curr) => (curr.passed ? acc + curr.weight : acc), 0);
 
     return { list, score: Math.min(100, score) };
-  }, [focusKeyword, title, seoDescription, excerpt, content, slug, powerWordsAnalysis, contentStats]);
+  }, [focusKeyword, title, seoTitle, seoDescription, excerpt, content, slug, powerWordsAnalysis, contentStats]);
 
   const rankMathScore = rankMathChecks.score;
 
@@ -413,6 +410,9 @@ export function BlogEditorPage({
         title: title.trim(),
         slug: slug.trim() || title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
         excerpt: excerpt.trim(),
+        meta_title: seoTitle.trim() || title.trim(),
+        meta_description: seoDescription.trim() || excerpt.trim(),
+        focus_keyword: focusKeyword.trim(),
         content,
         category: selectedCategory,
         tags,
@@ -636,7 +636,7 @@ export function BlogEditorPage({
               </div>
               <div className="flex items-center bg-[#2A2E36] border border-[#444A55] rounded-xl px-4 py-2.5 focus-within:border-[#F0B90B] focus-within:ring-2 focus-within:ring-[#F0B90B]/20">
                 <span className="text-xs text-[#848E9C] font-mono select-none pr-1 shrink-0">
-                  codexdynamics.com/blog/
+                  codexdynamics.com/blog?slug=
                 </span>
                 <input
                   type="text"
@@ -648,7 +648,7 @@ export function BlogEditorPage({
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(`https://codexdynamics.com/blog/${slug}`);
+                    navigator.clipboard.writeText(`https://codexdynamics.com/blog?slug=${encodeURIComponent(slug)}`);
                     toast.success("Article link copied to clipboard");
                   }}
                   className="crm-toolbar-btn shrink-0 ml-2"
@@ -1056,6 +1056,39 @@ export function BlogEditorPage({
                   </div>
                 </div>
 
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#848E9C] mb-1.5 block">
+                      SEO Title
+                    </label>
+                    <input
+                      type="text"
+                      value={seoTitle}
+                      onChange={(e) => setSeoTitle(e.target.value)}
+                      placeholder={title || "Use the article title"}
+                      className="text-xs w-full"
+                    />
+                    <span className="text-[11px] text-[#848E9C] mt-1 block">
+                      {seoTitle.trim() ? seoTitle.length : title.length} characters; leave blank to use the article title.
+                    </span>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-[#848E9C] mb-1.5 block">
+                      Meta Description
+                    </label>
+                    <textarea
+                      value={seoDescription}
+                      onChange={(e) => setSeoDescription(e.target.value)}
+                      placeholder={excerpt || "Use the executive excerpt"}
+                      rows={3}
+                      className="text-xs w-full resize-y"
+                    />
+                    <span className="text-[11px] text-[#848E9C] mt-1 block">
+                      {seoDescription.trim() ? seoDescription.length : excerpt.length} characters; leave blank to use the executive excerpt.
+                    </span>
+                  </div>
+                </div>
+
                 {/* Google SERP Snippet Preview */}
                 <div className="bg-[#2A2E36] border border-[#444A55] rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between pb-2 border-b border-[#444A55]">
@@ -1086,7 +1119,7 @@ export function BlogEditorPage({
                   <div className={`space-y-1.5 ${serpDevice === "mobile" ? "max-w-sm" : "max-w-2xl"}`}>
                     <div className="flex items-center gap-1.5 text-xs text-[#848E9C]">
                       <span className="font-semibold text-[#EAECEF]">Codex Dynamics</span>
-                      <span>› blog › {slug || "architectural-teardown"}</span>
+                      <span>› blog?slug={slug || "article-slug"}</span>
                     </div>
                     <h4 className="text-base sm:text-lg font-medium text-[#8AB4F8] hover:underline cursor-pointer leading-snug m-0">
                       {seoTitle || title || "Article Headline on Codex Dynamics"}
@@ -1183,7 +1216,7 @@ export function BlogEditorPage({
                     type="url"
                     value={canonicalUrl}
                     onChange={(e) => setCanonicalUrl(e.target.value)}
-                    placeholder="https://codexdynamics.com/blog/article-slug"
+                    placeholder="https://codexdynamics.com/blog?slug=article-slug"
                     className="text-xs font-mono"
                   />
                   <span className="text-[11px] text-[#848E9C] mt-1 block">

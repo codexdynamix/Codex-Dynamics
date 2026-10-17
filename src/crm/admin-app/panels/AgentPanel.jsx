@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Trash2 } from 'lucide-react';
 import { enterClientPortal } from '../clientImpersonation.js';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
@@ -24,6 +25,7 @@ import { portalDb } from '../../../services/portalDatabase';
 import ClientAccessEditor from '../components/ClientAccessEditor.jsx';
 import ClientAccountingPanel from '../components/ClientAccountingPanel.jsx';
 import ClientProfilePermissionManager from '../components/ClientProfilePermissionManager.jsx';
+import { ClientEmailAccounts, CommunicationActionModal } from '../components/HostingerMailAdmin.jsx';
 
 // macOS-style funnel filter button + popover for column header filters.
 function FilterPopover({ label, value, options, open, onToggle, onSelect, onClose, formatLabel }) {
@@ -177,7 +179,7 @@ function AgentPanel({ data, currentUser, setData, setUserLoginState, createClien
   const [activeFilterDropdown, setActiveFilterDropdown] = useState('');
   const [sortColumn, setSortColumn] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
-  const nativeTabs = ['clients', ...(canUseNotifications ? ['notifications'] : [])];
+  const nativeTabs = ['clients', ...(canUseNotifications ? ['inbox'] : [])];
   const tabStorageKey = `agent_activeTab:${currentUser?.id || 'unknown'}`;
   const [activeTab, setActiveTab] = useState(() => {
     const saved = sessionStorage.getItem(tabStorageKey);
@@ -186,9 +188,9 @@ function AgentPanel({ data, currentUser, setData, setUserLoginState, createClien
   const [clientUploadEnabled, setClientUploadEnabled] = useState(Boolean(currentUser?.capabilities?.client_upload));
   const [clientUploadLoading, setClientUploadLoading] = useState(true);
   const [showCreateClient, setShowCreateClient] = useState(false);
-  const nativeTabActive = ['clients', 'notifications'].includes(activeTab);
+  const nativeTabActive = ['clients', 'inbox'].includes(activeTab);
   useEffect(() => {
-    if (!canUseNotifications && activeTab === 'notifications') setActiveTab('clients');
+    if (!canUseNotifications && activeTab === 'inbox') setActiveTab('clients');
   }, [activeTab, canUseNotifications]);
   useEffect(() => { sessionStorage.setItem(tabStorageKey, activeTab); }, [activeTab, tabStorageKey]);
   useEffect(() => {
@@ -352,14 +354,14 @@ function AgentPanel({ data, currentUser, setData, setUserLoginState, createClien
 
       <div className="crm-super-admin-header crm-role-panel-header crm-inline-3907588b81" >
         <div className="crm-super-admin-tabs">
-          {['clients', ...(canUseNotifications ? ['notifications'] : [])].map((tab) => (
+          {['clients', ...(canUseNotifications ? ['inbox'] : [])].map((tab) => (
             <button
               key={tab}
               className={`crm-super-admin-tab-btn ${activeTab === tab ? 'crm-active' : ''}`}
               onClick={() => setActiveTab(tab)}
-              aria-label={`Switch to ${tab === 'clients' ? 'Client Management' : tab}`}
+              aria-label={`Switch to ${tab === 'clients' ? 'Client Management' : 'Notification Inbox'}`}
             >
-              {tab === 'clients' ? 'Client Management' : (tab.charAt(0).toUpperCase() + tab.slice(1))}
+              {tab === 'clients' ? 'Client Management' : 'Notification Inbox'}
             </button>
           ))}
         </div>
@@ -567,7 +569,7 @@ function AgentPanel({ data, currentUser, setData, setUserLoginState, createClien
         </div>
       )}
 
-      {canUseNotifications && nativeTabActive && activeTab === 'notifications' && (
+      {canUseNotifications && nativeTabActive && activeTab === 'inbox' && (
         <div className="crm-card">
           <h3>Notifications</h3>
           <AdminNotificationsInbox pollMs={30000} />
@@ -631,6 +633,8 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
   const [showClientPassword, setShowClientPassword] = useState(false);
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showEditClientModal, setShowEditClientModal] = useState(false);
+  const [communicationOpen, setCommunicationOpen] = useState(false);
+  const [emailAccountsOpen, setEmailAccountsOpen] = useState(false);
   const [isEditingRegistered, setIsEditingRegistered] = useState(false);
   const [registeredDateInput, setRegisteredDateInput] = useState('');
 
@@ -1040,43 +1044,77 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
           <button type="button" className="crm-action-btn crm-appointment-btn" onClick={() => setShowAppointmentModal(true)} title="Schedule appointment"><PaIcon name="appointment" />Appointments</button>
           {canManageClientSecurity && <button type="button" className="crm-action-btn crm-security-btn" onClick={() => setShowSecurityModal(true)} title="Client security settings"><PaIcon name="security" />Client Security</button>}
           <button type="button" className="crm-action-btn crm-support-btn" onClick={() => setShowChatModal(true)} title="Open support chat"><PaIcon name="support" />Client Support</button>
+          <button type="button" className="crm-action-btn crm-contact-btn" onClick={() => setCommunicationOpen(true)} title="Email, WhatsApp or call this client">Contact</button>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              className="crm-action-btn crm-email-accounts-btn"
+              onClick={() => setEmailAccountsOpen((open) => !open)}
+              aria-expanded={emailAccountsOpen}
+              aria-controls="crm-client-email-accounts"
+              title="Manage this client's assigned email accounts"
+            >
+              Email Accounts
+            </button>
+          )}
         </div>
       </div>
 
       {/* Quick Direct Communication Bar */}
       <div className="crm-inline-aad9ec8e0d">
         {client.email && (
-          <a
-            href={`mailto:${client.email}`}
+          <button
+            type="button"
+            onClick={() => setCommunicationOpen(true)}
             className="crm-inline-f427bbe513"
             title="Send email"
           >
             <svg className="crm-inline-4a0b60ab32" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
             <span>Email: {client.email}</span>
-          </a>
+          </button>
         )}
         {client.phone && (
-          <a
-            href={`tel:${client.phone}`}
+          <button
+            type="button"
+            onClick={() => setCommunicationOpen(true)}
             className="crm-inline-7ae5c9168f"
             title="Call client"
           >
             <svg className="crm-inline-4a0b60ab32" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
             <span>Call: {client.phone}</span>
-          </a>
+          </button>
         )}
         {client.phone && (
-          <a
-            href={`https://wa.me/${String(client.phone).replace(/[^\d+]/g, '').replace(/^\+/, '')}?text=${encodeURIComponent(`Hi ${client.firstName || client.name}, thank you for contacting Codex Dynamics.`)}`}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={() => setCommunicationOpen(true)}
             className="crm-inline-90b1bb8b63"
             title="WhatsApp chat"
           >
             <span>WhatsApp Direct</span>
-          </a>
+          </button>
         )}
       </div>
+
+      <CommunicationActionModal
+        open={communicationOpen}
+        title={`${client.firstName || client.name || 'Client'} communication`}
+        account={{ email: client.email, phone: client.phone }}
+        clientId={client.id}
+        onClose={() => setCommunicationOpen(false)}
+      />
+
+      {isSuperAdmin && emailAccountsOpen && (
+        <section id="crm-client-email-accounts" className="crm-client-email-accounts-panel" aria-label="Client email accounts">
+          <div className="crm-client-email-accounts-heading">
+            <h3>Email Accounts</h3>
+            <button type="button" className="crm-small-btn" onClick={() => setEmailAccountsOpen(false)}>
+              Close
+            </button>
+          </div>
+          <ClientEmailAccounts client={client} clients={data?.clients || []} />
+        </section>
+      )}
 
       <div className="crm-detail-grid crm-detail-grid-three">
         <div className="crm-detail-column">
@@ -1201,24 +1239,35 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
       )}
 
       {(canReadAccessSection || canReadAccountingSection || isSuperAdmin) && (
-        <section aria-label="Client account sections" className="crm-inline-c46b45fad9">
-          <h3 className="crm-inline-19e4676824">Client Account</h3>
-          {canReadAccessSection && (
-            <div className="crm-inline-2fc162ef25">
-              <ClientAccessEditor clientId={client.id} showNotification={showNotification} canEdit={canEditAccessSection} />
-            </div>
-          )}
-          {canReadAccountingSection && (
-            <div className="crm-inline-2fc162ef25">
-              <ClientAccountingPanel clientId={client.id} showNotification={showNotification} canEdit={canEditAccountingSection} />
-            </div>
-          )}
-          {isSuperAdmin && (
-            <div className="crm-inline-2fc162ef25">
-              <ClientProfilePermissionManager clientId={client.id} showNotification={showNotification} />
-            </div>
-          )}
-        </section>
+        <details aria-label="Client account sections" className="crm-client-account-details">
+          <summary>Client Account</summary>
+          <div className="crm-client-account-panels">
+            {canReadAccessSection && (
+              <details className="crm-client-account-panel">
+                <summary>Client Access</summary>
+                <div className="crm-inline-2fc162ef25">
+                  <ClientAccessEditor clientId={client.id} showNotification={showNotification} canEdit={canEditAccessSection} />
+                </div>
+              </details>
+            )}
+            {canReadAccountingSection && (
+              <details className="crm-client-account-panel">
+                <summary>Client Accounting</summary>
+                <div className="crm-inline-2fc162ef25">
+                  <ClientAccountingPanel clientId={client.id} showNotification={showNotification} canEdit={canEditAccountingSection} />
+                </div>
+              </details>
+            )}
+            {isSuperAdmin && (
+              <details className="crm-client-account-panel">
+                <summary>Staff Access to this Client</summary>
+                <div className="crm-inline-2fc162ef25">
+                  <ClientProfilePermissionManager clientId={client.id} showNotification={showNotification} />
+                </div>
+              </details>
+            )}
+          </div>
+        </details>
       )}
 
       <div className="crm-profile-grid">
@@ -1372,9 +1421,9 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
       {showChatModal && (
         <div className="crm-modal-overlay" onClick={() => setShowChatModal(false)}>
           <div className="crm-modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="crm-modal-header">
+            <div className="crm-modal-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
               <h3>Support Chat with {client.firstName}</h3>
-              <div className="crm-inline-54a4986ffc">
+              <div className="crm-inline-54a4986ffc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
                 <button
                   className="crm-small-btn crm-inline-420f1b2708"
                   onClick={handleClearChat}
@@ -1398,7 +1447,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
                   const canDelete = !msg.pending && !String(msg.id).startsWith('tmp-');
                   return (
                   <div key={msg.id} className={`crm-chat-message ${msg.sender === 'agent' ? 'crm-chat-agent' : 'crm-chat-client'}`}>
-                    {canDelete && msg.sender === 'agent' && (
+                    {canDelete && msg.sender !== 'agent' && (
                       <button
                         type="button"
                         onClick={() => handleDeleteMessage(msg.id)}
@@ -1406,7 +1455,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
                         aria-label="Delete message"
                         className="crm-chat-delete-btn"
                       >
-                        <i className="fas fa-trash-alt" />
+                        <Trash2 size={16} aria-hidden="true" />
                       </button>
                     )}
                     <div className="crm-chat-msg-col">
@@ -1434,7 +1483,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
                         <small>{msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}</small>
                       </div>
                     </div>
-                    {canDelete && msg.sender !== 'agent' && (
+                    {canDelete && msg.sender === 'agent' && (
                       <button
                         type="button"
                         onClick={() => handleDeleteMessage(msg.id)}
@@ -1442,7 +1491,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
                         aria-label="Delete message"
                         className="crm-chat-delete-btn"
                       >
-                        <i className="fas fa-trash-alt" />
+                        <Trash2 size={16} aria-hidden="true" />
                       </button>
                     )}
                   </div>

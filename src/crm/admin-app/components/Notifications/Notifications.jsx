@@ -97,6 +97,9 @@ const Compose = ({ onSent, isSuperAdmin, clients = [] }) => {
         message: message.trim(),
         kind,
       });
+      if (!Number.isFinite(Number(res?.sent))) {
+        throw new Error('Notification was sent, but the server did not return a recipient count.');
+      }
       setResult({ ok: true, sent: res.sent });
       setMessage('');
       if (recipientMode === 'specific') clearUser();

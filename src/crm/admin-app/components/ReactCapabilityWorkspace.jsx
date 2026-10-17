@@ -23,6 +23,39 @@ const DEFAULT_CAPABILITIES = {
   chat: true,
 };
 
+function getChatScopedClients(clients, currentUser) {
+  const role = currentUser?.role;
+  const userId = String(currentUser?.id || currentUser?._id || '');
+  if (role === 'Super Admin' || role === 'super-admin') return clients;
+
+  if (role === 'Office Manager' || role === 'office-manager') {
+    const officeId = String(currentUser?.officeId || currentUser?.office_id || '');
+    return officeId
+      ? clients.filter((client) => String(
+        client.assignedToOffice || client.assigned_office_id || client.officeId || '',
+      ) === officeId)
+      : [];
+  }
+
+  if (role === 'Team Leader' || role === 'team-leader') {
+    const teamId = String(currentUser?.teamId || currentUser?.team_id || '');
+    return clients.filter((client) => (
+      (teamId && String(client.assignedToTeam || client.assigned_team_id || client.teamId || '') === teamId)
+      || (userId && String(client.assignedToTeamLeader || client.assigned_team_leader_id || '') === userId)
+    ));
+  }
+
+  if (role === 'Agent' || role === 'agent') {
+    return userId
+      ? clients.filter((client) => String(
+        client.assignedToAgent || client.assigned_agent_id || client.agentId || '',
+      ) === userId)
+      : [];
+  }
+
+  return [];
+}
+
 export default function ReactCapabilityWorkspace({
   data,
   currentUser,
@@ -92,18 +125,21 @@ export default function ReactCapabilityWorkspace({
 
   if (!visibleTools.length) return null;
   const Component = current?.[2];
-  const scopedClients = data?.clients || [];
-  const props = ['content', 'enquiries', 'chat'].includes(current?.[0])
-    ? { showNotification, clients: scopedClients }
+  const allClients = data?.clients || [];
+  const chatClients = getChatScopedClients(allClients, currentUser);
+  const props = ['content', 'enquiries'].includes(current?.[0])
+    ? { showNotification, clients: allClients }
+    : current?.[0] === 'chat'
+      ? { showNotification, clients: chatClients, currentUser }
     : current?.[0] === 'notifications'
-      ? { isSuperAdmin: currentUser?.role === 'Super Admin', clients: scopedClients }
+      ? { isSuperAdmin: currentUser?.role === 'Super Admin', clients: allClients }
       : {};
 
   const contextValue = {
     currentUser,
-    clientUsers: scopedClients,
-    clients: scopedClients, setClients: () => {},
-    users: scopedClients, setUsers: () => {},
+    clientUsers: allClients,
+    clients: allClients, setClients: () => {},
+    users: allClients, setUsers: () => {},
     activityLog: [], setActivityLog: () => {},
     logAdminAction: () => {}, logActivity: () => {},
   };

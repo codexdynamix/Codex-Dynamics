@@ -773,6 +773,15 @@ export const portalDb = {
     if (!response.ok || !result.ok) throw new Error(result.error || `Could not edit message (${response.status}).`);
   },
 
+  async deleteSharedChatMessage(messageId: string): Promise<void> {
+    const response = await fetch(`/api/client/messages/${encodeURIComponent(messageId)}`, {
+      method: 'DELETE',
+      headers: portalAuthorizationHeaders(),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `Could not delete message (${response.status}).`);
+  },
+
   async clearSharedChatMessages(): Promise<void> {
     const response = await fetch('/api/client/messages', {
       method: 'DELETE',

@@ -3320,6 +3320,8 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
                   defaultTab="chat"
                   standalone
                   showNotification={showNotification}
+                  clients={data.clients}
+                  currentUser={currentUser}
                 />
               </div>
             ) : activeTab === 'Accounting' ? (

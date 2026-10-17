@@ -19,6 +19,20 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   app.use('/api', apiRouter);
+  app.use('/api', (error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const errorName = error instanceof Error ? error.name : '';
+    const isMongoConnectionError = errorName === 'MongoServerSelectionError'
+      || errorName === 'MongoNetworkError'
+      || errorName === 'MongoTopologyClosedError';
+    console.error(`[api] ${req.method} ${req.originalUrl} failed`, error);
+    if (res.headersSent) return _next(error);
+    res.status(isMongoConnectionError ? 503 : 500).json({
+      ok: false,
+      error: isMongoConnectionError
+        ? 'MongoDB is temporarily unavailable. Please try again.'
+        : 'The API request failed. Please try again.',
+    });
+  });
 
   if (!isProd) {
     const vite = await createViteServer({

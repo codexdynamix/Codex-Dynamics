@@ -189,7 +189,7 @@ function mapClientWireFields(value, fields) {
   ]));
 }
 
-async function adminFetch(path, { method = 'GET', body } = {}) {
+async function adminFetch(path, { method = 'GET', body, timeoutMs = 8000 } = {}) {
   const usesClientContract = path.includes('/api/admin/clients');
   const requestPath = usesClientContract
     ? path.replace('/api/admin/clients', '/api/admin/clients')
@@ -211,7 +211,7 @@ async function adminFetch(path, { method = 'GET', body } = {}) {
       headers,
       body: requestBody ? JSON.stringify(requestBody) : undefined,
     }),
-    8000
+    timeoutMs
   );
   let data = await res.json().catch(() => ({}));
   if (usesClientContract) data = mapClientWireFields(data, responseFields);
@@ -386,7 +386,7 @@ export async function testHostingerMailIntegrationAdmin(token) { return adminFet
 export async function removeHostingerMailIntegrationAdmin() { return adminFetch('/api/admin/integrations/hostinger-mail', { method: 'DELETE' }); }
 export async function listHostingerMailboxesAdmin() { const d = await adminFetch('/api/admin/hostinger/mailboxes'); return d.mailboxes || []; }
 export async function getHostingerMailOverviewAdmin() { return adminFetch('/api/admin/hostinger/overview'); }
-export async function getHostingerMailboxStatsAdmin(resourceId) { const d = await adminFetch(`/api/admin/hostinger/mailboxes/${encodeURIComponent(resourceId)}/stats`); return d.stats || null; }
+export async function sendHostingerMailToClientAdmin(resourceId, payload) { return adminFetch(`/api/admin/hostinger/mailboxes/${encodeURIComponent(resourceId)}/send-to-client`, { method: 'POST', body: payload, timeoutMs: 45000 }); }
 export async function getClientMailboxesAdmin(clientId) { const d = await adminFetch(`/api/admin/clients/${encodeURIComponent(clientId)}/mailboxes`); return d.mailboxes || d.assignments || []; }
 export async function assignClientMailboxAdmin(clientId, payload) { return adminFetch(`/api/admin/clients/${encodeURIComponent(clientId)}/mailboxes`, { method: 'POST', body: payload }); }
 export async function updateClientMailboxAdmin(clientId, assignmentId, payload) { return adminFetch(`/api/admin/clients/${encodeURIComponent(clientId)}/mailboxes/${encodeURIComponent(assignmentId)}`, { method: 'PATCH', body: payload }); }
@@ -555,13 +555,18 @@ export async function getAdminMessages(userId, { before, limit = 100 } = {}) {
   };
 }
 
-export async function sendAdminMessage(userId, text) {
+export async function sendAdminMessage(userId, text, senderName = 'Codex Dynamics Support') {
   if (!userId) throw new Error('user_id required');
   const body = String(text || '').trim();
   if (!body) throw new Error('Write a message before sending.');
   const data = await adminFetch('/api/admin/messages', {
     method: 'POST',
-    body: { user_id: userId, body },
+    body: {
+      user_id: userId,
+      sender: 'agent',
+      sender_name: String(senderName || 'Codex Dynamics Support').trim(),
+      body,
+    },
   });
   if (!data?.message) throw new Error('The message was not saved.');
   return mapAdminMessage(data.message);
@@ -599,8 +604,8 @@ export async function listAdminNotificationsPage({ limit = 50, onlyUnread = fals
       id: n.id,
       kind: n.kind,
       title: n.title || '',
-      body: n.body || '',
-      read: !!n.read_at,
+      body: n.body || n.message || '',
+      read: !!n.read_at || n.read === true,
       createdAt: n.created_at,
     })),
     unreadCount: Number(data.unread_count) || 0,
@@ -757,6 +762,16 @@ export async function deleteAdminMessage(messageId) {
   });
 }
 
+export async function deleteAdminClientMessage(clientId, messageId, { forMe = false } = {}) {
+  if (!clientId) throw new Error('user_id required');
+  if (!messageId) throw new Error('message_id required');
+  const params = new URLSearchParams({ user_id: clientId });
+  if (forMe) params.set('mode', 'me');
+  return adminFetch(`/api/admin/messages/${encodeURIComponent(messageId)}?${params.toString()}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function editAdminMessage(messageId, body) {
   if (!messageId) throw new Error('message_id required');
   const text = String(body || '').trim();
@@ -784,10 +799,11 @@ export async function postAdminPresence(userId, { isTyping = false } = {}) {
 }
 
 export async function getAdminChatPresence(userId) {
-  if (!userId) return { clientTyping: false, staffTyping: false, staffOnline: false };
+  if (!userId) return { clientTyping: false, clientOnline: false, staffTyping: false, staffOnline: false };
   const data = await adminFetch(`/api/admin/messages/presence?user_id=${encodeURIComponent(userId)}`);
   return {
     clientTyping: Boolean(data?.presence?.client_typing),
+    clientOnline: Boolean(data?.presence?.client_online),
     staffTyping: Boolean(data?.presence?.staff_typing),
     staffOnline: Boolean(data?.presence?.staff_online),
   };
@@ -1047,6 +1063,12 @@ export async function deleteStaffApi(id, { permanent = false } = {}) {
 
 function mapClientRow(l) {
   if (!l) return null;
+  const assignment = (currentField, legacyField) => {
+    const value = Object.prototype.hasOwnProperty.call(l, currentField)
+      ? l[currentField]
+      : l[legacyField];
+    return value || null;
+  };
   const first = l.first_name || '';
   const last  = l.last_name  || '';
   const commentHistory = (l.comment_history || []).map((c) => ({
@@ -1071,10 +1093,10 @@ function mapClientRow(l) {
     status:             l.status || l.stage || 'New',
     funnel:             l.funnel || '',
     affiliate:          l.affiliate || '',
-    assignedToOffice:   l.assigned_office_id || null,
-    assignedToTeam:     l.assigned_team_id   || null,
-    assignedToTeamLeader: l.assigned_team_leader_id || null,
-    assignedToAgent:    l.assigned_agent_id  || null,
+    assignedToOffice:   assignment('assignedToOffice', 'assigned_office_id'),
+    assignedToTeam:     assignment('assignedToTeam', 'assigned_team_id'),
+    assignedToTeamLeader: assignment('assignedToTeamLeader', 'assigned_team_leader_id'),
+    assignedToAgent:    assignment('assignedToAgent', 'assigned_agent_id'),
     assignedAgentName:  l.assigned_agent_name || null,
     portalEnabled:      l.portal_enabled == null ? null : Boolean(Number(l.portal_enabled)),
     portalStatus:       l.portal_status || null,

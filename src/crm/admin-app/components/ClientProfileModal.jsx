@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PhoneCall } from 'lucide-react';
+import { PhoneCall, Send, Trash2 } from 'lucide-react';
 import { getClientProfilePath } from '../clientProfileRouting.js';
 import { ROLE, getCountryFlag, CLIENT_STATUSES } from '../shared.jsx';
 import { portalDb } from '../../../services/portalDatabase';
@@ -18,11 +18,27 @@ import {
   getAdminMessages,
   sendAdminMessage,
   markAdminMessagesRead,
+  getAdminChatPresence,
+  postAdminPresence,
+  deleteAdminClientMessage,
+  clearAdminChat,
   getClientSupportTickets,
   replyToClientSupportTicket,
 } from '../adminApi.js';
 import { useConfirmDialog } from './ConfirmModal/ConfirmModal.jsx';
 import { ClientEmailAccounts, CommunicationActionModal } from './HostingerMailAdmin.jsx';
+
+function areSameChatMessages(current, next) {
+  return current.length === next.length && current.every((message, index) => {
+    const candidate = next[index];
+    return message.id === candidate.id
+      && message.text === candidate.text
+      && message.sender === candidate.sender
+      && message.senderName === candidate.senderName
+      && message.editedAt === candidate.editedAt
+      && message.readAt === candidate.readAt;
+  });
+}
 
 function formatRelativeTime(dateString) {
   if (!dateString) return 'Just now';
@@ -54,6 +70,8 @@ export default function ClientProfileModal({
 }) {
   const navigate = useNavigate();
   const [confirmDialog, confirm] = useConfirmDialog();
+  const [deleteMessageTarget, setDeleteMessageTarget] = useState(null);
+  const [isDeletingMessage, setIsDeletingMessage] = useState(false);
 
   const [profileStage, setProfileStage] = useState('');
   const [profileComment, setProfileComment] = useState('');
@@ -64,6 +82,7 @@ export default function ClientProfileModal({
   const [reassignAgentId, setReassignAgentId] = useState('');
 
   const [profileViewTab, setProfileViewTab] = useState('overview');
+  const [supportView, setSupportView] = useState('chat');
   const [liveClientPassword, setLiveClientPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordLoadError, setPasswordLoadError] = useState('');
@@ -75,8 +94,17 @@ export default function ClientProfileModal({
 
   // Client Support chat state
   const [chatMessages, setChatMessages] = useState([]);
+  const syncChatMessages = (nextMessages) => {
+    setChatMessages((current) => areSameChatMessages(current, nextMessages) ? current : nextMessages);
+  };
   const [chatInputText, setChatInputText] = useState('');
   const [chatSending, setChatSending] = useState(false);
+  const [chatDeleting, setChatDeleting] = useState(false);
+  const [chatPresence, setChatPresence] = useState({ clientTyping: false, clientOnline: false });
+  const [chatSyncError, setChatSyncError] = useState('');
+  const chatTypingTimeoutRef = useRef(null);
+  const chatTypingHeartbeatRef = useRef(null);
+  const chatTypingActiveRef = useRef(false);
   const chatMessagesEndRef = useRef(null);
   const [supportTickets, setSupportTickets] = useState([]);
   const [supportTicketsLoading, setSupportTicketsLoading] = useState(false);
@@ -145,13 +173,51 @@ export default function ClientProfileModal({
     } else {
       setProfileHistoryLoading(false);
     }
-  }, [client]);
+  }, [client?.id]);
+
+  useEffect(() => {
+    if (!client?.id || profileViewTab !== 'chat') return undefined;
+    let active = true;
+    const syncChat = async () => {
+      try {
+        const [result, presence] = await Promise.all([
+          getAdminMessages(client.id, { limit: 200 }),
+          getAdminChatPresence(client.id),
+        ]);
+        if (!active) return;
+        syncChatMessages(result.messages);
+        setChatPresence({ clientTyping: presence.clientTyping, clientOnline: presence.clientOnline });
+        setChatSyncError('');
+        if (result.messages.some((message) => message.sender === 'client' && !message.readAt)) {
+          await markAdminMessagesRead(client.id);
+        }
+      } catch (error) {
+        if (active) setChatSyncError(error?.message || 'Chat synchronization is unavailable.');
+      }
+    };
+    void syncChat();
+    const timer = window.setInterval(() => void syncChat(), 4000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      if (chatTypingTimeoutRef.current) window.clearTimeout(chatTypingTimeoutRef.current);
+      if (chatTypingHeartbeatRef.current) window.clearInterval(chatTypingHeartbeatRef.current);
+      if (chatTypingActiveRef.current) {
+        chatTypingActiveRef.current = false;
+        postAdminPresence(client.id, { isTyping: false }).catch((error) => {
+          console.error('[ClientProfileModal] Could not clear staff typing presence.', error);
+        });
+      }
+    };
+  }, [client?.id, profileViewTab]);
 
   // Real-time synchronization for Support Chat and password changes
   useEffect(() => {
     if (!client?.id) return;
     const handleChatUpdate = () => {
-      setChatMessages(portalDb.getDirectChatMessages(client.id));
+      getAdminMessages(client.id, { limit: 200 })
+        .then((result) => syncChatMessages(result.messages))
+        .catch((error) => setChatSyncError(error?.message || 'Could not refresh the client chat.'));
       setClientActivityData(portalDb.getClientActivity(client.id));
     };
     const handlePwdUpdate = (e) => {
@@ -245,7 +311,12 @@ export default function ClientProfileModal({
     if (!text || !client?.id) return;
     setChatSending(true);
     try {
-      const newMsg = await sendAdminMessage(client.id, text);
+      updateAdminTyping(false);
+      const newMsg = await sendAdminMessage(
+        client.id,
+        text,
+        currentUser?.name || currentUser?.fullName || 'Codex Dynamics Support'
+      );
       setChatMessages((prev) => [...prev, newMsg]);
       setChatInputText('');
       showNotification('Message sent to client portal.');
@@ -253,6 +324,70 @@ export default function ClientProfileModal({
       showNotification(error?.message || 'Could not send the client message.');
     } finally {
       setChatSending(false);
+    }
+  };
+
+  const updateAdminTyping = (isTyping) => {
+    if (chatTypingTimeoutRef.current) window.clearTimeout(chatTypingTimeoutRef.current);
+    if (isTyping) {
+      if (!chatTypingActiveRef.current) {
+        chatTypingActiveRef.current = true;
+        postAdminPresence(client.id, { isTyping: true })
+          .catch((error) => setChatSyncError(error?.message || 'Could not update chat presence.'));
+        chatTypingHeartbeatRef.current = window.setInterval(() => {
+          postAdminPresence(client.id, { isTyping: true })
+            .catch((error) => setChatSyncError(error?.message || 'Could not update chat presence.'));
+        }, 3000);
+      }
+      chatTypingTimeoutRef.current = window.setTimeout(() => updateAdminTyping(false), 8000);
+      return;
+    }
+    if (chatTypingHeartbeatRef.current) window.clearInterval(chatTypingHeartbeatRef.current);
+    chatTypingHeartbeatRef.current = null;
+    if (!chatTypingActiveRef.current) return;
+    chatTypingActiveRef.current = false;
+    postAdminPresence(client.id, { isTyping: false })
+      .catch((error) => setChatSyncError(error?.message || 'Could not update chat presence.'));
+  };
+
+  const handleDeleteChatMessage = async (message) => {
+    setDeleteMessageTarget(message);
+  };
+
+  const deleteChatMessage = async (forMe) => {
+    if (!deleteMessageTarget || isDeletingMessage) return;
+    const message = deleteMessageTarget;
+    setIsDeletingMessage(true);
+    try {
+      await deleteAdminClientMessage(client.id, message.id, { forMe });
+      setChatMessages((messages) => messages.filter((item) => item.id !== message.id));
+      setDeleteMessageTarget(null);
+      showNotification(forMe ? 'Message deleted from your chat.' : 'Message deleted for everyone.');
+    } catch (error) {
+      showNotification(error?.message || 'Could not delete the chat message.');
+    } finally {
+      setIsDeletingMessage(false);
+    }
+  };
+
+  const handleClearClientChat = async () => {
+    if (!chatMessages.length || chatDeleting) return;
+    const ok = await confirm({
+      title: 'Clear this chat for everyone?',
+      message: `This permanently deletes all ${chatMessages.length} messages in ${displayName}'s chat from both the CRM and the client portal.`,
+      confirmLabel: 'Clear chat for everyone',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setChatDeleting(true);
+    try {
+      await clearAdminChat(client.id);
+      setChatMessages([]);
+      showNotification('Chat cleared for both sides.');
+    } catch (error) {
+      showNotification(error?.message || 'Could not clear the client chat.');
+    } finally {
+      setChatDeleting(false);
     }
   };
 
@@ -493,6 +628,9 @@ export default function ClientProfileModal({
         <div
           className="crm-inline-f0e9e113bb"
           onClick={(e) => e.stopPropagation()}
+          style={profileViewTab === 'chat' && supportView === 'tickets'
+            ? { maxHeight: 'calc(100dvh - 64px)', overflowY: 'auto' }
+            : undefined}
         >
           {/* Header */}
           <div
@@ -561,13 +699,14 @@ export default function ClientProfileModal({
           <div className="crm-inline-a7d12e2e9b">
             <button type="button" onClick={() => setCommunicationOpen(true)} title="Email, WhatsApp or call this client" className="crm-inline-dc39cd3ee2"><span className="crm-inline-3fa4a03f07">✦</span>Contact</button>
             {client.email && (
-              <a
-                href={`mailto:${client.email}`}
+              <button
+                type="button"
+                onClick={() => setCommunicationOpen(true)}
                 className="crm-inline-f427bbe513"
                 title="Send email"
               >
                 <span>✉ Email Customer: {client.email}</span>
-              </a>
+              </button>
             )}
             {client.phone && (
               <a
@@ -601,7 +740,7 @@ export default function ClientProfileModal({
             )}
           </div>
 
-          <CommunicationActionModal open={communicationOpen} title={`${client.firstName || client.name || 'Client'} communication`} account={{ email: client.email, phone: client.phone }} onClose={() => setCommunicationOpen(false)} />
+          <CommunicationActionModal open={communicationOpen} title={`${client.firstName || client.name || 'Client'} communication`} account={{ email: client.email, phone: client.phone }} clientId={client.id} onClose={() => setCommunicationOpen(false)} />
 
           {/* Tab Navigation: Profile / Client Security / Client Support / Activity */}
           <div
@@ -768,8 +907,35 @@ export default function ClientProfileModal({
 
           {/* TAB 2: CLIENT SUPPORT CHAT */}
           {profileViewTab === 'chat' && (
-            <div className="crm-inline-c1514e7501">
-              <section style={{ marginBottom: 24, padding: 18, border: '1px solid var(--crm-border, rgba(255,255,255,.1))', borderRadius: 14, background: 'var(--crm-card, rgba(255,255,255,.03))' }}>
+            <div
+              className="crm-inline-c1514e7501"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+                ...(supportView === 'tickets' ? { background: 'transparent', border: 0, borderRadius: 0, padding: 0, marginBottom: 0 } : {}),
+              }}
+            >
+              <div role="tablist" aria-label="Client support views" style={{ display: 'flex', gap: 8, padding: 5, borderRadius: 12, background: 'var(--crm-card-hover, rgba(255,255,255,.04))', width: 'fit-content', maxWidth: '100%' }}>
+                {[
+                  { id: 'chat', label: 'Direct Chat' },
+                  { id: 'tickets', label: `Support Tickets${supportTickets.length ? ` (${supportTickets.length})` : ''}` },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={supportView === item.id}
+                    onClick={() => setSupportView(item.id)}
+                    className={supportView === item.id ? 'crm-modal-btn-primary' : 'crm-modal-btn-secondary'}
+                    style={{ padding: '8px 14px', borderRadius: 9, whiteSpace: 'nowrap' }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {supportView === 'tickets' && (
+              <section style={{ marginBottom: 0, padding: 0, border: 0, borderRadius: 0, background: 'transparent' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
                   <div>
                     <h3 className="crm-inline-ea6402deab">Support Tickets</h3>
@@ -789,9 +955,19 @@ export default function ClientProfileModal({
                 ) : supportTickets.length === 0 ? (
                   <p className="crm-inline-a172100265">No portal support tickets have been submitted by this client.</p>
                 ) : (
-                  <div style={{ display: 'grid', gap: 14 }}>
-                    {supportTickets.map((ticket) => (
-                      <article key={ticket.id} style={{ padding: 14, borderRadius: 12, border: '1px solid var(--crm-border, rgba(255,255,255,.1))' }} data-testid={`crm-support-ticket-${ticket.id}`}>
+                  <div
+                    className="crm-support-ticket-list"
+                    style={{ border: '1px solid var(--crm-border, rgba(255,255,255,.1))', borderRadius: 12, overflowX: 'hidden', background: 'var(--crm-card, rgba(255,255,255,.03))' }}
+                  >
+                    {supportTickets.map((ticket, index) => (
+                      <article
+                        key={ticket.id}
+                        style={{
+                          padding: 14,
+                          borderBottom: index < supportTickets.length - 1 ? '1px solid var(--crm-border, rgba(255,255,255,.1))' : 0,
+                        }}
+                        data-testid={`crm-support-ticket-${ticket.id}`}
+                      >
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
                           <div>
                             <strong>{ticket.subject}</strong>
@@ -825,8 +1001,11 @@ export default function ClientProfileModal({
                   </div>
                 )}
               </section>
-              <div className="crm-inline-89f1352d55">
-                <div>
+              )}
+              {supportView === 'chat' && (
+              <>
+              <div className="crm-inline-89f1352d55" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+                <div style={{ flex: '1 1 320px', minWidth: 0 }}>
                   <h3 className="crm-inline-ea6402deab">
                     💬 Client Support Channel: {displayName}
                   </h3>
@@ -834,9 +1013,20 @@ export default function ClientProfileModal({
                     Direct communication thread with the client. Messages sent here are instantly visible in the Client Portal Support section.
                   </p>
                 </div>
-                <span className="crm-inline-b9bca5b742">
-                  Real-time Sync
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 12, flex: '0 1 auto' }}>
+                  <span className="crm-inline-b9bca5b742" role="status">
+                    {chatPresence.clientTyping ? 'Client is typing…' : chatPresence.clientOnline ? 'Client online' : chatSyncError || 'Waiting for client'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void handleClearClientChat()}
+                    disabled={!chatMessages.length || chatDeleting}
+                    className="crm-inline-ff72acff12"
+                    style={{ background: '#FF453A', color: '#FFFFFF', opacity: !chatMessages.length || chatDeleting ? 0.5 : 1 }}
+                  >
+                    {chatDeleting ? 'Clearing…' : 'Clear chat for everyone'}
+                  </button>
+                </div>
               </div>
 
               {/* Chat Message Stream */}
@@ -867,6 +1057,16 @@ export default function ClientProfileModal({
                         >
                           {msg.text || msg.body}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteChatMessage(msg)}
+                          className="crm-inline-ff72acff12"
+                          style={{ marginTop: 4, padding: 5, background: 'transparent', color: '#FF453A', border: '1px solid rgba(255,69,58,.35)', display: 'inline-flex', alignItems: 'center' }}
+                          title="Delete message"
+                          aria-label="Delete message"
+                        >
+                          <Trash2 size={15} aria-hidden="true" />
+                        </button>
                       </div>
                     );
                   })
@@ -875,22 +1075,35 @@ export default function ClientProfileModal({
               </div>
 
               {/* Chat Input Bar */}
-              <form onSubmit={handleSendChatMessage} className="crm-inline-0e35dfc9e8">
+              <form
+                onSubmit={handleSendChatMessage}
+                className="crm-inline-0e35dfc9e8"
+                style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%' }}
+              >
                 <input
                   type="text"
                   value={chatInputText}
-                  onChange={(e) => setChatInputText(e.target.value)}
+                  onChange={(e) => {
+                    setChatInputText(e.target.value);
+                    updateAdminTyping(Boolean(e.target.value.trim()));
+                  }}
                   placeholder="Type a response to the client (press Enter to send)..."
                   className="crm-inline-252357170c"
+                  style={{ flex: 1, minWidth: 0 }}
                 />
                 <button
                   type="submit"
                   disabled={chatSending || !chatInputText.trim()}
-                  className="crm-inline-ff72acff12" style={{background: !chatInputText.trim() ? 'var(--crm-card-hover)' : '#0071E3', color: !chatInputText.trim() ? 'var(--crm-text-muted)' : '#FFFFFF', cursor: !chatInputText.trim() ? 'not-allowed' : 'pointer'}}
+                  className="crm-chat-send-btn"
+                  title={chatSending ? 'Sending message' : 'Send message'}
+                  aria-label={chatSending ? 'Sending message' : 'Send message'}
+                  style={{ width: 34, height: 34, minWidth: 34, padding: 0, flex: '0 0 34px' }}
                 >
-                  {chatSending ? 'Sending...' : 'Send'}
+                  <Send size={16} aria-hidden="true" />
                 </button>
               </form>
+              </>
+              )}
             </div>
           )}
 
@@ -1536,6 +1749,30 @@ export default function ClientProfileModal({
         </div>
       </div>
       {confirmDialog}
+      {deleteMessageTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-chat-message-title"
+          onClick={() => { if (!isDeletingMessage) setDeleteMessageTarget(null); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 10001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,.65)' }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{ width: '100%', maxWidth: 420, padding: 24, borderRadius: 12, border: '1px solid var(--crm-border)', background: 'var(--crm-card)', color: 'var(--crm-text-primary)', boxShadow: '0 12px 32px rgba(0,0,0,.5)' }}
+          >
+            <h3 id="delete-chat-message-title" style={{ margin: '0 0 8px', fontSize: 16 }}>Delete message</h3>
+            <p style={{ margin: '0 0 20px', color: 'var(--crm-text-muted)', fontSize: 14, lineHeight: 1.5 }}>
+              Choose whether to remove this message only from your chat or from the client&apos;s chat too.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
+              <button type="button" className="crm-modal-btn-secondary" disabled={isDeletingMessage} onClick={() => setDeleteMessageTarget(null)}>Cancel</button>
+              <button type="button" className="crm-modal-btn-secondary" disabled={isDeletingMessage} onClick={() => void deleteChatMessage(true)}>Delete for me</button>
+              <button type="button" className="crm-modal-btn-danger" disabled={isDeletingMessage} onClick={() => void deleteChatMessage(false)}>Delete for everyone</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
