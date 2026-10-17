@@ -58,6 +58,7 @@ import AdminHeader from './components/AdminHeader.jsx';
 import ReactCapabilityWorkspace from './components/ReactCapabilityWorkspace.jsx';
 import { Crown, Building2, Users, UserCheck, Briefcase, ArrowRight, ShieldCheck } from 'lucide-react';
 import { applyCrmThemeToDom, loadCrmThemeFromServer } from './components/CrmSettings/crmThemeState';
+import { useSiteConfig } from '../../context/SiteConfigContext';
 import './crm-matte.css';
 import './components/AdminHeader.css';
 
@@ -306,10 +307,11 @@ function RolePage({ data, dataLoading, role, setClientAssignment, assignOfficeMa
 
 function BackofficeLanding() {
   const navigate = useNavigate();
-  const { abbreviation, name } = useBrandIdentity();
+  const { config } = useSiteConfig();
+  const name = config.siteName || 'Codex Dynamics';
   const [first, ...rest] = (name || 'Codex Dynamics').split(/[- / \s]+/);
   const second = rest.join(' ') || 'Dynamics';
-  const initial = (abbreviation || 'C').charAt(0).toUpperCase();
+  const initial = name.trim().charAt(0).toUpperCase() || 'C';
 
   const portals = [
     { to: '/admin/login/super-admin',    icon: Crown, title: 'Super Admin',    desc: 'Full system governance: offices, teams, staff & clients', accent: '#FF9F0A' },
