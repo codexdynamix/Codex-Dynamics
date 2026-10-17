@@ -644,25 +644,10 @@ export default function CrmSettingsTab({ showNotification }) {
 
           <div className="crm-options-group">
             <label className="crm-options-group-title">
-              <Sparkles size={14} />
-              <span>Glass Surfaces</span>
+              <Layers size={14} />
+              <span>Surface Style</span>
             </label>
-            <div className="crm-ios-segmented">
-              {[
-                { id: false, label: 'Solid' },
-                { id: true, label: 'Glass' },
-              ].map((option) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  className={settings.glassEffect === option.id ? 'is-selected' : ''}
-                  onClick={() => setSettings((prev) => ({ ...prev, glassEffect: option.id }))}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <div className="crm-options-group-help">Use translucent, blurred surfaces instead of solid cards.</div>
+            <div className="crm-options-group-help">Solid, opaque surfaces are used across every CRM theme. Glass and backdrop blur are disabled.</div>
           </div>
 
           <div className="crm-options-group">

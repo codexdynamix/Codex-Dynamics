@@ -1,0 +1,200 @@
+.crm-notification-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.crm-notification-bell__trigger {
+  position: relative;
+  display: inline-flex;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--crm-border, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  background: var(--crm-card-hover, #2c2c2e);
+  box-shadow: none;
+  color: var(--crm-text-secondary, #a1a1a6);
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.crm-notification-bell__trigger:hover,
+.crm-notification-bell__trigger.is-ringing {
+  border-color: var(--crm-border-hover, rgba(255, 255, 255, 0.16));
+  background: color-mix(in srgb, var(--crm-card-hover, #2c2c2e) 82%, var(--crm-text-primary, #f5f5f7));
+  color: var(--crm-text-primary, #f5f5f7);
+}
+
+.crm-notification-bell__trigger:focus-visible,
+.crm-notification-menu button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--crm-accent, #54708e) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.crm-notification-bell__badge,
+.crm-notification-menu__badge {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border: 1px solid #1c1c1e;
+  border-radius: 9px;
+  background: #435a75;
+  color: #edf1f5;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.crm-notification-bell__badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  pointer-events: none;
+}
+
+.crm-notification-menu {
+  --menu-bg: #1c1c1e;
+  --menu-raised: #252528;
+  --menu-border: rgba(255, 255, 255, 0.09);
+  --menu-text: #f5f5f7;
+  --menu-muted: #a1a1a6;
+  position: fixed;
+  z-index: 1100;
+  width: min(332px, calc(100vw - 24px));
+  max-height: min(380px, calc(100dvh - 24px));
+  overflow: auto;
+  border: 1px solid var(--menu-border);
+  border-radius: 12px;
+  background: var(--menu-bg);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  color: var(--menu-text);
+  animation: crm-notification-menu-enter 140ms ease-out;
+}
+
+.crm-notification-menu[data-crm-mode="light"] {
+  --menu-bg: #ffffff;
+  --menu-raised: #f2f2f4;
+  --menu-border: rgba(29, 29, 31, 0.1);
+  --menu-text: #1d1d1f;
+  --menu-muted: #6e6e73;
+}
+
+.crm-notification-menu__header,
+.crm-notification-menu__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.crm-notification-menu__header {
+  border-bottom: 1px solid var(--menu-border);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.crm-notification-menu__count {
+  color: var(--menu-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.crm-notification-menu__items {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+
+.crm-notification-menu__item {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--menu-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.crm-notification-menu__item:hover {
+  background: var(--menu-raised);
+}
+
+.crm-notification-menu__label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.crm-notification-menu__badge {
+  border-color: transparent;
+}
+
+.crm-notification-menu__status,
+.crm-notification-menu__chevron {
+  color: var(--menu-muted);
+  font-size: 11px;
+}
+
+.crm-notification-menu__chevron {
+  font-size: 18px;
+}
+
+.crm-notification-menu__error {
+  margin: 0 12px 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #bf4646 32%, var(--menu-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, #bf4646 9%, var(--menu-bg));
+  color: color-mix(in srgb, #bf4646 72%, var(--menu-text));
+  font-size: 11px;
+}
+
+.crm-notification-menu__footer {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--menu-border);
+  color: var(--menu-muted);
+  font-size: 11px;
+}
+
+.crm-notification-menu__footer button {
+  padding: 6px 10px;
+  border: 1px solid var(--menu-border);
+  border-radius: 7px;
+  background: var(--menu-raised);
+  color: var(--menu-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.crm-notification-menu__footer button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.crm-notification-menu__footer small {
+  font-size: 10px;
+}
+
+@keyframes crm-notification-menu-enter {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crm-notification-menu {
+    animation: none;
+  }
+}

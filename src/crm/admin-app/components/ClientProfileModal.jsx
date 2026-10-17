@@ -27,6 +27,8 @@ import {
 } from '../adminApi.js';
 import { useConfirmDialog } from './ConfirmModal/ConfirmModal.jsx';
 import { ClientEmailAccounts, CommunicationActionModal } from './HostingerMailAdmin.jsx';
+import ClientProfileTabs from './ClientProfileTabs.jsx';
+import ClientSupportTickets from './ClientSupportTickets.jsx';
 
 function areSameChatMessages(current, next) {
   return current.length === next.length && current.every((message, index) => {
@@ -664,7 +666,7 @@ export default function ClientProfileModal({
               className="crm-inline-efb00f566d"
             >
               <button
-                className="crm-inline-b2fa82ebe2"
+                className="crm-button crm-button-primary crm-inline-b2fa82ebe2"
                 onClick={() => {
                   onClose();
                   navigate(getClientProfilePath(ROLE.SUPER_ADMIN, currentUser?.id || 'adm_sa', client.id));
@@ -674,7 +676,7 @@ export default function ClientProfileModal({
                 Open Profile
               </button>
               <button
-                className="crm-inline-ac55a4f70b"
+                className="crm-button crm-button-secondary crm-inline-ac55a4f70b"
                 onClick={enterClientAccount}
                 title="Log in directly to this client's portal account (bypassing password)"
               >
@@ -697,12 +699,12 @@ export default function ClientProfileModal({
 
           {/* Quick Reach Action Bar */}
           <div className="crm-inline-a7d12e2e9b">
-            <button type="button" onClick={() => setCommunicationOpen(true)} title="Email, WhatsApp or call this client" className="crm-inline-dc39cd3ee2"><span className="crm-inline-3fa4a03f07">✦</span>Contact</button>
+            <button type="button" onClick={() => setCommunicationOpen(true)} title="Email, WhatsApp or call this client" className="crm-button crm-button-secondary crm-inline-dc39cd3ee2"><span className="crm-inline-3fa4a03f07">✦</span>Contact</button>
             {client.email && (
               <button
                 type="button"
                 onClick={() => setCommunicationOpen(true)}
-                className="crm-inline-f427bbe513"
+                className="crm-button crm-button-secondary crm-inline-f427bbe513"
                 title="Send email"
               >
                 <span>✉ Email Customer: {client.email}</span>
@@ -743,29 +745,12 @@ export default function ClientProfileModal({
           <CommunicationActionModal open={communicationOpen} title={`${client.firstName || client.name || 'Client'} communication`} account={{ email: client.email, phone: client.phone }} clientId={client.id} onClose={() => setCommunicationOpen(false)} />
 
           {/* Tab Navigation: Profile / Client Security / Client Support / Activity */}
-          <div
-            className="crm-inline-8770695224"
-          >
-            {[
-              { id: 'overview', label: '📋 Profile & Scope', color: '#0A84FF' },
-              { id: 'security', label: '🔒 Client Security', color: '#FF453A' },
-              { id: 'chat', label: `💬 Client Support ${chatMessages.length ? `(${chatMessages.length})` : ''}`, color: '#30D158' },
-              { id: 'activity', label: '📊 Client Activity', color: '#0A84FF' },
-              ...(isSuperAdmin ? [{ id: 'mailboxes', label: 'Email Accounts', color: '#557894' }] : []),
-            ].map((tab) => {
-              const isActive = profileViewTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setProfileViewTab(tab.id)}
-                  className="crm-inline-64c753f0c8" style={{border: '1px solid', borderColor: isActive ? tab.color : 'var(--crm-border, rgba(255, 255, 255, 0.1))', background: isActive ? tab.color : 'rgba(255, 255, 255, 0.05)', color: isActive ? '#FFFFFF' : 'var(--crm-text-secondary, #8E8E93)'}}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
+          <ClientProfileTabs
+            activeTab={profileViewTab}
+            onChange={setProfileViewTab}
+            chatCount={chatMessages.length}
+            isSuperAdmin={isSuperAdmin}
+          />
 
           {isSuperAdmin && profileViewTab === 'mailboxes' && (
             <ClientEmailAccounts client={client} clients={data?.clients || []} />
@@ -787,14 +772,14 @@ export default function ClientProfileModal({
                   <button
                     type="button"
                     onClick={handleTogglePortalAccess}
-                    className="crm-inline-500966de65" style={{background: portalAccessEnabled ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)', color: portalAccessEnabled ? '#30D158' : '#FF453A', border: `1px solid ${portalAccessEnabled ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 69, 58, 0.3)'}`}}
+                    className={`crm-button ${portalAccessEnabled ? 'crm-button-success' : 'crm-button-danger'} crm-inline-500966de65`}
                   >
                     {portalAccessEnabled ? '● Portal Enabled' : '○ Portal Suspended'}
                   </button>
                   <button
                     type="button"
                     onClick={handleLaunchClientPortal}
-                    className="crm-inline-f1e2227876"
+                    className="crm-button crm-button-primary crm-inline-f1e2227876"
                   >
                     <span>🚀 Launch Portal As Client</span>
                   </button>
@@ -813,7 +798,7 @@ export default function ClientProfileModal({
                       <button
                         type="button"
                         onClick={() => { navigator.clipboard.writeText(client.email); showNotification('Email copied to clipboard'); }}
-                        className="crm-inline-51d8320d08"
+                        className="crm-button crm-button-quiet crm-inline-51d8320d08"
                       >
                         Copy
                       </button>
@@ -837,7 +822,7 @@ export default function ClientProfileModal({
                     <button
                       type="button"
                       onClick={() => setShowClientPassword(!showClientPassword)}
-                      className="crm-inline-6951103dc5"
+                      className="crm-button crm-button-quiet crm-inline-6951103dc5"
                     >
                       {showClientPassword ? 'Hide' : 'Show'}
                     </button>
@@ -849,7 +834,7 @@ export default function ClientProfileModal({
                         setTimeout(() => setPasswordCopied(false), 2000);
                         showNotification('Password copied to clipboard');
                       }}
-                      className="crm-inline-f4e20b9f15"
+                      className="crm-button crm-button-quiet crm-inline-f4e20b9f15"
                     >
                       {passwordCopied ? '✓ Copied' : 'Copy'}
                     </button>
@@ -874,7 +859,7 @@ export default function ClientProfileModal({
                     type="button"
                     onClick={handleSavePassword}
                     disabled={isUpdatingPassword || !newPasswordInput.trim()}
-                    className="crm-inline-e7cd8534b4" style={{background: !newPasswordInput.trim() ? 'var(--crm-card-hover)' : '#0ECB81', color: !newPasswordInput.trim() ? 'var(--crm-text-muted)' : '#FFFFFF', cursor: !newPasswordInput.trim() ? 'not-allowed' : 'pointer'}}
+                    className="crm-button crm-button-primary crm-inline-e7cd8534b4"
                   >
                     {isUpdatingPassword ? 'Updating...' : 'Save & Update Password'}
                   </button>
@@ -897,7 +882,7 @@ export default function ClientProfileModal({
                 <button
                   type="button"
                   onClick={handleLaunchClientPortal}
-                  className="crm-inline-161b0fd3c2"
+                  className="crm-button crm-button-secondary crm-inline-161b0fd3c2"
                 >
                   Open /portal/dashboard &rarr;
                 </button>
@@ -935,72 +920,25 @@ export default function ClientProfileModal({
                 ))}
               </div>
               {supportView === 'tickets' && (
-              <section style={{ marginBottom: 0, padding: 0, border: 0, borderRadius: 0, background: 'transparent' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-                  <div>
-                    <h3 className="crm-inline-ea6402deab">Support Tickets</h3>
-                    <p className="crm-inline-a172100265">Client-submitted portal requests and replies. Responses here appear in that ticket in the client portal.</p>
-                  </div>
-                  <button type="button" onClick={() => {
+                <ClientSupportTickets
+                  client={client}
+                  tickets={supportTickets}
+                  loading={supportTicketsLoading}
+                  error={supportTicketsError}
+                  drafts={ticketReplyDrafts}
+                  replyingId={ticketReplyingId}
+                  onDraftChange={(ticketId, value) => {
+                    setTicketReplyDrafts((drafts) => ({ ...drafts, [ticketId]: value }));
+                  }}
+                  onRefresh={() => {
                     setSupportTicketsLoading(true);
                     getClientSupportTickets(client.id)
                       .then(setSupportTickets)
                       .catch((error) => setSupportTicketsError(error?.message || 'Could not refresh support requests.'))
                       .finally(() => setSupportTicketsLoading(false));
-                  }} className="crm-inline-64c753f0c8">Refresh</button>
-                </div>
-                {supportTicketsError && <div role="alert" style={{ marginBottom: 12, color: '#ff6961' }}>{supportTicketsError}</div>}
-                {supportTicketsLoading ? (
-                  <p className="crm-inline-a172100265">Loading support tickets…</p>
-                ) : supportTickets.length === 0 ? (
-                  <p className="crm-inline-a172100265">No portal support tickets have been submitted by this client.</p>
-                ) : (
-                  <div
-                    className="crm-support-ticket-list"
-                    style={{ border: '1px solid var(--crm-border, rgba(255,255,255,.1))', borderRadius: 12, overflowX: 'hidden', background: 'var(--crm-card, rgba(255,255,255,.03))' }}
-                  >
-                    {supportTickets.map((ticket, index) => (
-                      <article
-                        key={ticket.id}
-                        style={{
-                          padding: 14,
-                          borderBottom: index < supportTickets.length - 1 ? '1px solid var(--crm-border, rgba(255,255,255,.1))' : 0,
-                        }}
-                        data-testid={`crm-support-ticket-${ticket.id}`}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                          <div>
-                            <strong>{ticket.subject}</strong>
-                            <div className="crm-inline-a172100265">{ticket.ticketNumber} · {ticket.category} · {ticket.priority}</div>
-                          </div>
-                          <span>{ticket.status}</span>
-                        </div>
-                        <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
-                          {(ticket.messages || []).map((message) => (
-                            <div key={message.id} style={{ padding: 10, borderRadius: 10, background: message.sender === 'staff' || message.sender === 'agent' ? 'rgba(0,113,227,.12)' : 'rgba(255,255,255,.04)' }}>
-                              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{message.senderName || (message.sender === 'staff' ? 'Support' : client.name)}</div>
-                              <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <form onSubmit={(event) => { event.preventDefault(); void handleReplyToSupportTicket(ticket); }} style={{ display: 'flex', gap: 8 }}>
-                          <input
-                            aria-label={`Reply to ${ticket.ticketNumber}`}
-                            value={ticketReplyDrafts[ticket.id] || ''}
-                            onChange={(event) => setTicketReplyDrafts((drafts) => ({ ...drafts, [ticket.id]: event.target.value }))}
-                            maxLength={5000}
-                            placeholder="Write a reply to this portal ticket..."
-                            style={{ flex: 1, minWidth: 0, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--crm-border, rgba(255,255,255,.15))', background: 'var(--crm-input, rgba(0,0,0,.15))', color: 'inherit' }}
-                          />
-                          <button type="submit" disabled={ticketReplyingId === ticket.id || !String(ticketReplyDrafts[ticket.id] || '').trim()} className="crm-inline-ff72acff12">
-                            {ticketReplyingId === ticket.id ? 'Sending…' : 'Reply'}
-                          </button>
-                        </form>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
+                  }}
+                  onReply={handleReplyToSupportTicket}
+                />
               )}
               {supportView === 'chat' && (
               <>
@@ -1021,7 +959,7 @@ export default function ClientProfileModal({
                     type="button"
                     onClick={() => void handleClearClientChat()}
                     disabled={!chatMessages.length || chatDeleting}
-                    className="crm-inline-ff72acff12"
+                    className="crm-button crm-button-danger crm-inline-ff72acff12"
                     style={{ background: '#FF453A', color: '#FFFFFF', opacity: !chatMessages.length || chatDeleting ? 0.5 : 1 }}
                   >
                     {chatDeleting ? 'Clearing…' : 'Clear chat for everyone'}
@@ -1308,7 +1246,7 @@ export default function ClientProfileModal({
               </div>
               <button
                 type="button"
-                className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-471ec2ccd9"
+                className="crm-button crm-button-primary crm-super-admin-btn crm-super-admin-btn-small crm-inline-471ec2ccd9"
                 onClick={async () => {
                   if (setData) {
                     setData((prev) => ({
@@ -1590,7 +1528,7 @@ export default function ClientProfileModal({
                       showNotification('Could not clear profile history: ' + (err.message || 'error'));
                     }
                   }}
-                  className="crm-inline-3f4b9cc554"
+                  className="crm-button crm-button-danger crm-inline-3f4b9cc554"
                 >
                   🗑 Clear All
                 </button>
@@ -1640,7 +1578,7 @@ export default function ClientProfileModal({
                                 showNotification('Could not delete entry: ' + (err.message || 'error'));
                               }
                             }}
-                            className="crm-inline-d302f5a029"
+                            className="crm-button crm-button-danger crm-inline-d302f5a029"
                           >
                             🗑
                           </button>
@@ -1705,14 +1643,14 @@ export default function ClientProfileModal({
           <div className="crm-inline-e262f6096d">
             <div className="crm-inline-f36152c67e">
               <button
-                className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-b268c66aab"
+                className="crm-button crm-button-primary crm-super-admin-btn crm-super-admin-btn-small crm-inline-b268c66aab"
                 onClick={saveProfile}
 
               >
                 💾 Save Changes
               </button>
               <button
-                className="crm-super-admin-btn crm-super-admin-btn-small crm-super-admin-btn-secondary"
+                className="crm-button crm-button-secondary crm-super-admin-btn crm-super-admin-btn-small crm-super-admin-btn-secondary"
                 onClick={unassignClient}
               >
                 Return to Pool
@@ -1720,7 +1658,7 @@ export default function ClientProfileModal({
             </div>
             <div className="crm-inline-f36152c67e">
               <button
-                className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-a6cfd0a49f"
+                className="crm-button crm-button-secondary crm-super-admin-btn crm-super-admin-btn-small crm-inline-a6cfd0a49f"
 
                 onClick={resetClientstatus}
                 title="Reset stage to New and erase all status history"
@@ -1728,7 +1666,7 @@ export default function ClientProfileModal({
                 🔄 Reset Status
               </button>
               <button
-                className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-b9279831c8"
+                className="crm-button crm-button-secondary crm-super-admin-btn crm-super-admin-btn-small crm-inline-b9279831c8"
 
                 onClick={clearClientComments}
                 title="Permanently delete all comments on this client"
@@ -1736,7 +1674,7 @@ export default function ClientProfileModal({
                 🗨 Clear Comments
               </button>
               <button
-                className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-fd8ae4de3b"
+                className="crm-button crm-button-danger crm-super-admin-btn crm-super-admin-btn-small crm-inline-fd8ae4de3b"
 
                 onClick={deleteClient}
               >
@@ -1766,9 +1704,9 @@ export default function ClientProfileModal({
               Choose whether to remove this message only from your chat or from the client&apos;s chat too.
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
-              <button type="button" className="crm-modal-btn-secondary" disabled={isDeletingMessage} onClick={() => setDeleteMessageTarget(null)}>Cancel</button>
-              <button type="button" className="crm-modal-btn-secondary" disabled={isDeletingMessage} onClick={() => void deleteChatMessage(true)}>Delete for me</button>
-              <button type="button" className="crm-modal-btn-danger" disabled={isDeletingMessage} onClick={() => void deleteChatMessage(false)}>Delete for everyone</button>
+              <button type="button" className="crm-button crm-button-secondary crm-modal-btn-secondary" disabled={isDeletingMessage} onClick={() => setDeleteMessageTarget(null)}>Cancel</button>
+              <button type="button" className="crm-button crm-button-secondary crm-modal-btn-secondary" disabled={isDeletingMessage} onClick={() => void deleteChatMessage(true)}>Delete for me</button>
+              <button type="button" className="crm-button crm-button-danger crm-modal-btn-danger" disabled={isDeletingMessage} onClick={() => void deleteChatMessage(false)}>Delete for everyone</button>
             </div>
           </div>
         </div>

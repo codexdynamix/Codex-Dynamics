@@ -17,6 +17,7 @@ import ClientProjectsWorkspace from '../components/ClientProjectsWorkspace.jsx';
 import IdentityReviewsWorkspace from '../components/IdentityReviewsWorkspace.jsx';
 import SiteCrmWorkspace from '../components/SiteCrmWorkspace.jsx';
 import ClientProfileModal from '../components/ClientProfileModal.jsx';
+import ClientManagementTable from '../components/ClientManagementTable.jsx';
 import StaffProfileModal from '../components/StaffProfileModal.jsx';
 import AuditLog from '../components/AuditLog/AuditLog.jsx';
 import Notifications from '../components/Notifications/Notifications.jsx';
@@ -1184,10 +1185,11 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
 
           <div className="crm-inline-5fc00d5b95">
             <SearchAutocomplete
-              className="crm-super-admin-input crm-inline-dd0dba8867"
+              className="crm-super-admin-input crm-inline-dd0dba8867 crm-client-table-search-input"
               placeholder="Search name, email, phone, country..."
               value={search}
               onChange={(v) => { setSearch(v); setPage(1); }}
+              style={{ flex: '2 1 240px', minWidth: 220 }}
               fetchSuggestions={searchAdminClients}
 
               buildSuggestions={(q) => {
@@ -1475,175 +1477,33 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
             Click any row to open the client profile. Showing {paged.length} of {filtered.length} clients (page {page}/{totalPages})
           </div>
 
-          <div className="crm-admin-table-container">
-            <table className="crm-admin-table">
-              <thead>
-                <tr>
-                  <th className="crm-inline-3666be5c05">
-                    <input
-                      type="checkbox"
-                      checked={paged.length > 0 && paged.every(l => selected.includes(l.id))}
-                      onChange={e => {
-                        if (e.target.checked) setSelected([...new Set([...selected, ...paged.map(l => l.id)])]);
-                        else setSelected(selected.filter(id => !paged.find(l => l.id === id)));
-                      }}
-                    />
-                  </th>
-                  <th>Client ID</th>
-                  <th>Name</th>
-                  <th>Country</th>
-                  <th>Status</th>
-                  <th>Registered</th>
-                  <th>Last Activity</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paged.length === 0 ? (
-                  <tr><td colSpan={8} className="crm-inline-69d13600ed">No clients match your filters.</td></tr>
-                ) : paged.map(client => (
-                  <React.Fragment key={client.id}>
-                  <tr className="crm-inline-8410c989c9" style={{background: selected.includes(client.id) ? 'var(--crm-card)' : undefined}} onClick={() => openProfile(client)}>
-                    <td onClick={e => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(client.id)}
-                        onChange={e => setSelected(e.target.checked ? [...selected, client.id] : selected.filter(id => id !== client.id))}
-                      />
-                    </td>
-                    <td className="crm-inline-93c6e1d4bb">
-                      <div className="crm-inline-9023e926fd">
-                        <span className="crm-inline-fc24c65864">
-                          {client.id ? client.id.slice(0, 6) : '-'}
-                        </span>
-                        {client.id && (
-                          <button
-                            title={client.id}
-                            onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(client.id); }}
-                            className="crm-inline-ccd1cf626f"
-                          >
-                            <i className="fas fa-copy crm-inline-e9e0e4af65" ></i>
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="crm-inline-2a907996ec">
-                        <div className="crm-inline-87c98a4272">
-                          {((client.firstName?.[0] || '') + (client.lastName?.[0] || '')).toUpperCase() || 'L'}
-                        </div>
-                        <div>
-                          <div className="crm-inline-22d6a321ff">{client.firstName} {client.lastName}</div>
-                          <div className="crm-inline-b4bc3c00c9">{client.email || '—'}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{getCountryFlag(client.countryCode, client.country)} {client.country}</td>
-                    <td onClick={e => e.stopPropagation()} className="crm-inline-93c6e1d4bb">
-                      <StatusDropdown
-                        value={normalizeStage(client.stage)}
-                        options={CLIENT_STATUSES}
-                        onChange={(newStage) => handleClientstatusChange(client.id, newStage)}
-                      />
-                    </td>
-                    <td className="crm-inline-a81558e644">{client.registeredDate || (client.createdAt ? new Date(client.createdAt).toLocaleDateString() : '-')}</td>
-                    <td className="crm-inline-93c6e1d4bb">
-                      {(() => {
-                        const raw = client.lastCommentDate;
-                        if (!raw) return <span className="crm-inline-d2b86264af">Never</span>;
-                        const diffMs = Date.now() - new Date(raw).getTime();
-                        const days = Math.floor(diffMs / 86400000);
-                        const label = days === 0 ? 'Today' : days === 1 ? '1d ago' : `${days}d ago`;
-                        const color = days === 0 ? '#0ECB81' : days <= 3 ? '#0ECB81' : days <= 7 ? 'var(--crm-accent)' : days <= 30 ? '#FF9F0A' : '#F6465D';
-                        return (
-                          <span className="crm-inline-5b305d031c" style={{background: `${color}18`, color, border: `1px solid ${color}33`}}>
-                            {label}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td onClick={e => e.stopPropagation()} className="crm-inline-93c6e1d4bb">
-                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-                        <button
-                          className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-2b76d0882a"
-                          onClick={() => enterClientAccount(client)}
-                          title="Enter client portal directly (no password needed)"
-                        >🚀 Enter Portal</button>
-                        <button
-                          className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-a9a778b759"
-                          onClick={() => { setEditingClient(client); }}
-                          title="Edit client profile fields"
-                        >Edit</button>
-                        <button
-                          className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-7106182ce9"
-                          onClick={() => deleteClient(client)}
-                          title="Move to Recycle Bin"
-                        >🗑 Bin</button>
-                      </div>
-                    </td>
-                  </tr>
-                  {quickAssignClientId === client.id && (
-                    <tr className="crm-inline-0c90dd5535">
-                      <td colSpan={8} className="crm-inline-8ebf6e213b" onClick={e => e.stopPropagation()}>
-                        <div className="crm-inline-a92a09d3d7">
-                          <span className="crm-inline-a0086506f6">Assign "{client.firstName} {client.lastName}" to:</span>
-                          <select
-                            className="crm-super-admin-select crm-inline-8fb290329b"
-
-                            value={quickAssignAgentId}
-                            onChange={e => setQuickAssignAgentId(e.target.value)}
-                            autoFocus
-                          >
-                            <option value="">- Unassign (return to pool) -</option>
-                            {data.offices.map(office => {
-                              const officeAgents = data.users.filter(u => u.role === ROLE.AGENT && u.officeId === office.id);
-                              if (!officeAgents.length) return null;
-                              return (
-                                <optgroup key={office.id} label={`[office] ${office.name}`}>
-                                  {officeAgents.map(agent => {
-                                    const team = data.teams.find(t => t.id === agent.teamId);
-                                    return (
-                                      <option key={agent.id} value={agent.id}>
-                                        {agent.name}{team ? `  /  ${team.name}` : ''}
-                                      </option>
-                                    );
-                                  })}
-                                </optgroup>
-                              );
-                            })}
-                            {data.users.filter(u => u.role === ROLE.AGENT && !u.officeId).map(agent => (
-                              <option key={agent.id} value={agent.id}>{agent.name} (no office)</option>
-                            ))}
-                          </select>
-                          <button
-                            className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-7235bfdd8f"
-
-                            onClick={() => handleQuickAssign(client)}
-                          >✓ Apply</button>
-                          <button
-                            className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-7c51cb61d4"
-
-                            onClick={() => { setQuickAssignClientId(null); setQuickAssignAgentId(''); }}
-                          >✕ Cancel</button>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {totalPages > 1 && (
-            <div className="crm-inline-cabecec358">
-              <button className="crm-super-admin-btn crm-super-admin-btn-small crm-pagination-btn-gold" disabled={page === 1} onClick={() => setPage(1)}>«</button>
-              <button className="crm-super-admin-btn crm-super-admin-btn-small crm-pagination-btn-gold" disabled={page === 1} onClick={() => setPage(p => p - 1)}>‹ Prev</button>
-              <span className="crm-inline-2d73a8a9dc">Page {page} of {totalPages}</span>
-              <button className="crm-super-admin-btn crm-super-admin-btn-small crm-pagination-btn-gold" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next ›</button>
-              <button className="crm-super-admin-btn crm-super-admin-btn-small crm-pagination-btn-gold" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>»</button>
-            </div>
-          )}
+          <ClientManagementTable
+            data={data}
+            clients={paged}
+            selected={selected}
+            onTogglePage={(checked) => {
+              if (checked) setSelected([...new Set([...selected, ...paged.map((client) => client.id)])]);
+              else setSelected(selected.filter((id) => !paged.find((client) => client.id === id)));
+            }}
+            onToggleClient={(clientId, checked) => {
+              setSelected(checked ? [...selected, clientId] : selected.filter((id) => id !== clientId));
+            }}
+            onOpenClient={openProfile}
+            onStatusChange={handleClientstatusChange}
+            onEnterPortal={enterClientAccount}
+            onEditClient={setEditingClient}
+            onMoveToBin={deleteClient}
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            quickAssignment={quickAssignClientId ? {
+              clientId: quickAssignClientId,
+              agentId: quickAssignAgentId,
+              onAgentChange: setQuickAssignAgentId,
+              onApply: handleQuickAssign,
+              onCancel: () => { setQuickAssignClientId(null); setQuickAssignAgentId(''); },
+            } : null}
+          />
         </div>
       )}
 
@@ -2625,7 +2485,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
   };
   const [activeTab, setActiveTab] = useState(() => {
     const saved = sessionStorage.getItem('sa_activeTab');
-    return saved === 'Settings' ? 'Site Settings' : (saved || 'Dashboard');
+    return saved === 'Settings' ? 'Site Settings' : (saved === 'Notifications' ? 'Client Management' : (saved || 'Dashboard'));
   });
   const [clientProjects, setClientProjects] = useState([]);
   const [clientProjectClients, setClientProjectClients] = useState([]);
@@ -2669,6 +2529,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
   const [activeSubTab, setActiveSubTab] = useState(() => {
     const saved = sessionStorage.getItem('sa_activeSubTab');
     const allowed = ['Client Management', 'Client Management', 'Client Upload', 'Notifications'];
+    if (sessionStorage.getItem('sa_activeTab') === 'Notifications') return 'Notifications';
     return allowed.includes(saved) ? (saved === 'Client Management' ? 'Client Management' : saved) : 'Client Management';
   });
   const tabsScrollRef = useRef(null);
@@ -2679,7 +2540,12 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
   useEffect(() => { sessionStorage.setItem('sa_activeTab', activeTab); }, [activeTab]);
   useEffect(() => { sessionStorage.setItem('sa_activeSubTab', activeSubTab); }, [activeSubTab]);
   useEffect(() => {
-    const handler = (e) => setActiveTab(e.detail.tab);
+    const handler = (e) => {
+      setActiveTab(e.detail.tab);
+      if (['Client Management', 'Client Upload', 'Notifications'].includes(e.detail.subTab)) {
+        setActiveSubTab(e.detail.subTab);
+      }
+    };
     window.addEventListener('admin:goto-tab', handler);
     return () => window.removeEventListener('admin:goto-tab', handler);
   }, []);

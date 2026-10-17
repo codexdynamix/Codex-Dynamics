@@ -11,6 +11,7 @@ import {
   getUserNotificationsForAdminApi,
   deleteClientNotificationsApi,
 } from '../../adminApi';
+import './Notifications.css';
 
 const KIND_OPTIONS = [
   { value: 'info',     label: 'Info',                 color: 'var(--crm-text-secondary)' },
@@ -364,7 +365,7 @@ const SentHistory = ({ refreshKey, isSuperAdmin }) => {
 
   // Column layout: type | message | recipient | sent-by | timestamp | reached | recall
   return (
-    <div className="crm-notification-section">
+    <div className="crm-notification-section crm-notification-section-history">
       <div className="crm-inline-89f1352d55">
         <div className="crm-notification-section-head">
           <span>[list]</span> Sent Notifications History

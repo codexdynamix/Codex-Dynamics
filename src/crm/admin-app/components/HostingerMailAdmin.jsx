@@ -70,7 +70,7 @@ export function CommunicationActionModal({ open, title, account, clientId, onClo
     }
   };
   return createPortal(<div className="crm-profile-overlay" role="presentation" onClick={onClose}>
-    <div className="crm-profile-modal crm-inline-61fc146f6b" role="dialog" aria-modal="true" aria-label={title || 'Communication actions'} onClick={e => e.stopPropagation()} >
+    <div className="crm-profile-modal crm-communication-modal crm-inline-61fc146f6b" role="dialog" aria-modal="true" aria-label={title || 'Communication actions'} onClick={e => e.stopPropagation()} >
       <div className="crm-profile-header-wrap"><div className="crm-profile-header-left"><div className="crm-profile-avatar-box crm-inline-8ccc74c40c" >✉</div><div className="crm-profile-title-block"><h3 className="crm-profile-user-name">{title || 'Contact'} </h3><div className="crm-profile-clearance-meta"><span className="crm-inline-95e927bf07">Communication</span></div></div></div><button type="button" className="crm-profile-close-btn" onClick={onClose} aria-label="Close communication actions"><X size={16} /></button></div>
       <div className="crm-profile-tabs-bar" role="tablist">
         <button type="button" role="tab" aria-selected={tab === 'mail'} className={`crm-profile-tab-button ${tab === 'mail' ? 'is-active' : ''}`} onClick={() => setTab('mail')}><Mail size={14} /><span>Email</span></button>

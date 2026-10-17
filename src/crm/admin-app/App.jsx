@@ -10,7 +10,6 @@ import {
 import './admin.css';
 import './CrmTheme.css';
 import './CRMInlineStyles.css';
-import { usePlatformSettings } from '../platformDefaults';
 import StaffLogin from './components/Login/StaffLogin.jsx';
 import RoleLogin from './components/Login/RoleLogin.jsx';
 import {
@@ -55,11 +54,12 @@ import OfficeManagerPanel from './panels/OfficeManagerPanel.jsx';
 import TeamLeaderPanel from './panels/TeamLeaderPanel.jsx';
 import AgentPanel, { ClientProfilePage } from './panels/AgentPanel.jsx';
 import StaffProfilePage from './components/StaffProfilePage.jsx';
-import { UserChrome } from './components/UserChrome.jsx';
+import AdminHeader from './components/AdminHeader.jsx';
 import ReactCapabilityWorkspace from './components/ReactCapabilityWorkspace.jsx';
 import { Crown, Building2, Users, UserCheck, Briefcase, ArrowRight, ShieldCheck } from 'lucide-react';
 import { applyCrmThemeToDom, loadCrmThemeFromServer } from './components/CrmSettings/crmThemeState';
 import './crm-matte.css';
+import './components/AdminHeader.css';
 
 const CRM_ICON_TOKENS = {
   office: '🏢',
@@ -175,26 +175,6 @@ function useCrmTextNormalization() {
 // every component file just to support the panel split.
 export { DataContext, NotificationContext, CLIENT_STATUSES } from './shared';
 
-// Live-updating brand mark: reads platformAbbreviation from the backend-driven
-// module singleton. Re-renders instantly whenever settings are saved via the
-// admin Settings page - no localStorage involved.
-function useBrandIdentity() {
-  const s = usePlatformSettings();
-  return { abbreviation: s.platformAbbreviation, name: s.platformName };
-}
-
-function AdminBrand() {
-  const { abbreviation, name } = useBrandIdentity();
-  const [first, ...rest] = (name || 'Codex Dynamics').split(/[- / \s]+/);
-  const second = rest.join(' ') || 'Dynamics';
-  return (
-    <div className="crm-brand">
-      <span className="crm-brand-mark">{abbreviation || 'CD'}</span>
-      <span className="crm-brand-text">{first} {second}<span className="crm-brand-tag">CRM</span></span>
-    </div>
-  );
-}
-
 function RolePage({ data, dataLoading, role, setClientAssignment, assignOfficeManager, createOfficeWithManager, createStandaloneOfficeManager, assignTeamLeader, createTeamLeader, createStandaloneTeamLeader, createAgent, assignAgent, toggleStaffBlocked, setData, setUserLoginState, updateClient, createClient, showNotification }) {
   const { userId } = useParams();
   const user = data.users.find((u) => u.id === userId);
@@ -251,10 +231,7 @@ function RolePage({ data, dataLoading, role, setClientAssignment, assignOfficeMa
   if (user.role !== role) {
     return (
       <div className="crm-app-shell">
-        <header className="crm-topbar">
-          <AdminBrand />
-          <div className="crm-top-actions">Role mismatch</div>
-        </header>
+        <AdminHeader roleMismatch />
         <div className="crm-body-grid">
           <aside className="crm-sidebar">
             <h2>Dashboard</h2>
@@ -270,18 +247,13 @@ function RolePage({ data, dataLoading, role, setClientAssignment, assignOfficeMa
 
   return (
     <div className="crm-app-shell">
-      <header className="crm-topbar">
-        <AdminBrand />
-        <div className="crm-top-actions">
-          <UserChrome
-            user={user}
-            data={data}
-            setData={setData}
-            messagesEnabled={capabilitiesLoaded && capabilities.chat !== false}
-            notificationsEnabled={capabilitiesLoaded && capabilities.notifications !== false}
-          />
-        </div>
-      </header>
+      <AdminHeader
+        user={user}
+        data={data}
+        setData={setData}
+        messagesEnabled={capabilitiesLoaded && capabilities.chat !== false}
+        notificationsEnabled={capabilitiesLoaded && capabilities.notifications !== false}
+      />
 
       <div className={`crm-body-grid ${user.role === ROLE.AGENT ? 'crm-agent-view' : ''} ${user.role === ROLE.TEAM_LEAD ? 'crm-no-sidebar' : ''} ${user.role === ROLE.OFFICE_MANAGER ? 'crm-no-sidebar' : ''} ${user.role === ROLE.SUPER_ADMIN ? 'crm-no-sidebar' : ''}`}>
         {user.role === ROLE.SUPER_ADMIN && (

@@ -1,0 +1,298 @@
+.crm-admin-app .crm-notifications-workspace {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-section {
+  min-width: 0;
+  margin: 0;
+  padding: 20px;
+  border: 1px solid var(--crm-border);
+  border-radius: 12px;
+  background: var(--crm-card);
+  box-shadow: none;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-section-danger {
+  border-color: color-mix(in srgb, var(--crm-ios-red, #ff453a) 28%, var(--crm-border));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-section-head {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 16px;
+  color: var(--crm-text-primary);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-section-browse {
+  border-color: var(--crm-border);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--crm-text-secondary);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-input,
+.crm-admin-app .crm-notifications-workspace .crm-notification-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--crm-border);
+  border-radius: 8px;
+  background: var(--crm-input-bg);
+  color: var(--crm-text-primary);
+  box-shadow: none;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-input {
+  min-height: 38px;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-textarea {
+  min-height: 112px;
+  padding: 10px 12px;
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-input {
+  padding: 9px 12px;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-input:focus,
+.crm-admin-app .crm-notifications-workspace .crm-notification-textarea:focus {
+  border-color: color-mix(in srgb, var(--crm-accent) 55%, var(--crm-border));
+  outline: 2px solid color-mix(in srgb, var(--crm-accent) 14%, transparent);
+  outline-offset: 0;
+}
+
+.crm-admin-app .crm-notifications-workspace button {
+  box-shadow: none !important;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-recipient-mode,
+.crm-admin-app .crm-notifications-workspace .crm-notification-wipe-btn,
+.crm-admin-app .crm-notifications-workspace .crm-notification-delete-selected,
+.crm-admin-app .crm-notifications-workspace .crm-notifications-send-btn {
+  border: 1px solid var(--crm-border);
+  border-radius: 8px;
+  background: var(--crm-card-hover);
+  color: var(--crm-text-secondary);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-recipient-mode[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--crm-accent) 32%, var(--crm-border));
+  background: color-mix(in srgb, var(--crm-accent) 12%, var(--crm-card));
+  color: var(--crm-text-primary);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notifications-send-btn {
+  min-height: 40px;
+  margin-top: 16px;
+  background: color-mix(in srgb, var(--crm-accent) 17%, var(--crm-card));
+  color: var(--crm-text-primary);
+  font-weight: 600;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notifications-send-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--crm-accent) 23%, var(--crm-card));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notifications-send-btn:disabled,
+.crm-admin-app .crm-notifications-workspace .crm-notification-wipe-btn:disabled,
+.crm-admin-app .crm-notifications-workspace .crm-notification-delete-selected:disabled {
+  background: var(--crm-card-hover);
+  color: var(--crm-text-muted);
+  cursor: not-allowed;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-color: var(--crm-border);
+  border-radius: 8px;
+  background: var(--crm-card-hover);
+  color: var(--crm-text-primary);
+  font-size: 12px;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-pill-remove {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--crm-text-secondary);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-dropdown-wrap {
+  position: relative;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-dropdown-list {
+  position: absolute;
+  z-index: 99;
+  top: 100%;
+  right: 0;
+  left: 0;
+  max-height: 200px;
+  margin-top: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--crm-border);
+  border-radius: 9px;
+  background: var(--crm-card);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-client-option {
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--crm-border) 72%, transparent);
+  color: var(--crm-text-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-client-option:hover {
+  background: var(--crm-card-hover);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-client-option.is-muted {
+  color: var(--crm-text-secondary);
+  cursor: default;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-result[data-status="success"] {
+  border-color: color-mix(in srgb, #30a46c 30%, var(--crm-border));
+  background: color-mix(in srgb, #30a46c 9%, var(--crm-card));
+  color: color-mix(in srgb, #30a46c 80%, var(--crm-text-primary));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-result[data-status="error"] {
+  border-color: color-mix(in srgb, var(--crm-ios-red, #ff453a) 28%, var(--crm-border));
+  background: color-mix(in srgb, var(--crm-ios-red, #ff453a) 8%, var(--crm-card));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-sent-grid {
+  min-width: 760px;
+  gap: 12px;
+  grid-template-columns: 108px minmax(160px, 1fr) 140px 90px 110px 50px 110px;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-sent-notification-row[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--crm-text-primary) 6%, var(--crm-card));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-sent-notification-row:not([aria-expanded="true"]):hover {
+  background: color-mix(in srgb, var(--crm-text-primary) 3%, var(--crm-card));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-user-notification-row[aria-expanded="true"] {
+  background: var(--crm-card);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-user-notification-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--crm-accent) 5%, var(--crm-card));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-user-notification-row:not([aria-expanded="true"]):not([aria-selected="true"]):hover {
+  background: color-mix(in srgb, var(--crm-text-primary) 6%, var(--crm-card));
+}
+
+.crm-admin-app .crm-notifications-workspace [data-recalled="true"] {
+  opacity: 0.65;
+}
+
+.crm-admin-app .crm-notifications-workspace [data-broadcast="true"] {
+  color: color-mix(in srgb, var(--crm-accent) 74%, var(--crm-text-primary));
+}
+
+.crm-admin-app .crm-notifications-workspace [data-broadcast="false"] {
+  color: var(--crm-text-primary);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-kind,
+.crm-admin-app .crm-notifications-workspace .crm-notification-read-status {
+  border: 1px solid color-mix(in srgb, currentColor 24%, var(--crm-border));
+  background: color-mix(in srgb, currentColor 8%, var(--crm-card));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-read-status[data-read="true"] {
+  color: var(--crm-text-secondary);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-read-status[data-read="false"] {
+  color: color-mix(in srgb, var(--crm-accent) 76%, var(--crm-text-primary));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-kind-text {
+  color: var(--notification-kind-color);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-read-text[data-read="true"] {
+  color: var(--crm-text-secondary);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-read-text[data-read="false"] {
+  color: color-mix(in srgb, var(--crm-accent) 76%, var(--crm-text-primary));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-preview {
+  border-left: 3px solid var(--notification-kind-color);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-recall:hover {
+  background: color-mix(in srgb, var(--crm-ios-red, #ff453a) 10%, var(--crm-card));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-delete:hover,
+.crm-admin-app .crm-notifications-workspace .crm-notification-pill-remove:hover {
+  color: var(--crm-ios-red, #ff453a);
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-wipe-btn:not(:disabled),
+.crm-admin-app .crm-notifications-workspace .crm-notification-delete-selected:not(:disabled) {
+  border-color: color-mix(in srgb, var(--crm-ios-red, #ff453a) 34%, var(--crm-border));
+  background: color-mix(in srgb, var(--crm-ios-red, #ff453a) 8%, var(--crm-card));
+  color: color-mix(in srgb, var(--crm-ios-red, #ff453a) 72%, var(--crm-text-primary));
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-section-browse {
+  overflow: hidden;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-section-history {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.crm-admin-app .crm-notifications-workspace .crm-notification-section-browse > :is(.crm-inline-faca856376, .crm-inline-231af52a20) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 720px) {
+  .crm-admin-app .crm-notifications-workspace {
+    gap: 10px;
+  }
+
+  .crm-admin-app .crm-notifications-workspace .crm-notification-section {
+    padding: 16px;
+  }
+
+  .crm-admin-app .crm-notifications-workspace .crm-notification-sent-grid {
+    min-width: 700px;
+  }
+}

@@ -705,7 +705,7 @@ function normalizeCrmThemeSettings(settings = {}) {
     customCardHover: HEX_COLOR.test(merged.customCardHover) ? merged.customCardHover : '',
     density: DENSITY_IDS.has(merged.density) ? merged.density : DEFAULT_CRM_SETTINGS.density,
     radius: RADIUS_IDS.has(merged.radius) ? merged.radius : DEFAULT_CRM_SETTINGS.radius,
-    glassEffect: Boolean(merged.glassEffect),
+    glassEffect: false,
     cardElevation: merged.cardElevation === 'raised' ? 'raised' : 'flat',
     tableZebra: Boolean(merged.tableZebra),
   };
@@ -817,7 +817,7 @@ export function applyCrmThemeToDom(settings = getCrmThemeSettings()) {
   root.style.setProperty('--crm-ios-focus', `rgba(${accentRgb}, 0.35)`);
   root.style.setProperty('--crm-ios-shadow-card', shadowCard);
   root.style.setProperty('--crm-ios-shadow-raised', shadowRaised);
-  root.style.setProperty('--crm-surface-glass', settings.glassEffect ? 'color-mix(in srgb, var(--crm-card) 82%, transparent)' : 'var(--crm-card)');
+  root.style.setProperty('--crm-surface-glass', 'var(--crm-card-surface)');
   root.style.setProperty('--crm-accent-fg', accentForeground);
   root.style.setProperty('--crm-surface-alt', cardHover);
   root.style.setProperty('--cdx-accent-glow', 'transparent');

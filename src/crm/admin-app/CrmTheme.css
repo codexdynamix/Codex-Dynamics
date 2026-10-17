@@ -58,11 +58,6 @@
     --crm-density-card-padding: 24px;
   }
 
-  .crm-admin-app[data-crm-glass="true"] {
-    --crm-ios-surface: color-mix(in srgb, var(--crm-card-surface, var(--crm-card-hover)) 82%, transparent);
-    --crm-ios-backdrop: blur(24px) saturate(180%);
-  }
-
   .crm-admin-app :is(
     .crm-super-admin-card,
     .crm-dashboard-card,
@@ -189,25 +184,6 @@
     -webkit-backdrop-filter: var(--crm-ios-backdrop);
     backdrop-filter: var(--crm-ios-backdrop);
     box-shadow: var(--crm-ios-shadow-card);
-  }
-
-  .crm-admin-app.crm-admin-app .crm-topbar .crm-notif-bell-btn {
-    border: 1px solid color-mix(in srgb, var(--crm-accent) 42%, var(--crm-border));
-    border-radius: var(--crm-ios-radius-control);
-    background: color-mix(in srgb, var(--crm-accent) 12%, var(--crm-ios-surface));
-    color: var(--crm-accent);
-    box-shadow: var(--crm-ios-shadow-raised);
-  }
-
-  .crm-admin-app.crm-admin-app .crm-topbar .crm-notif-bell-btn:hover {
-    border-color: color-mix(in srgb, var(--crm-accent) 62%, var(--crm-border));
-    background: color-mix(in srgb, var(--crm-accent) 20%, var(--crm-ios-surface));
-    color: var(--crm-accent);
-  }
-
-  .crm-admin-app.crm-admin-app .crm-topbar .crm-notif-bell-btn svg {
-    color: inherit;
-    stroke: currentColor;
   }
 
   .crm-admin-app.crm-admin-app .crm-topbar .crm-user-chip {
@@ -378,16 +354,16 @@
 
   .crm-admin-app :is(.crm-super-admin-btn, .crm-btn-primary, .crm-super-admin-btn-small) {
     border-radius: var(--crm-ios-radius-control);
-    background: var(--crm-ios-blue);
-    color: var(--crm-accent-fg, #FFFFFF);
+    background: var(--crm-button-primary-bg);
+    color: var(--crm-text-primary);
     font-family: inherit;
-    box-shadow: var(--crm-ios-shadow-raised);
+    box-shadow: none;
   }
 
   .crm-admin-app :is(.crm-btn-secondary, .crm-super-admin-btn-secondary, .crm-action-btn) {
     border-radius: var(--crm-ios-radius-control);
-    background: color-mix(in srgb, var(--crm-ios-blue) 12%, var(--crm-card));
-    color: var(--crm-ios-blue);
+    background: var(--crm-button-secondary-bg);
+    color: var(--crm-text-primary);
     font-family: inherit;
   }
 
@@ -459,294 +435,7 @@
     color: #0ECB81;
   }
 
-  .crm-admin-app .crm-notification-client-option:hover {
-    background: color-mix(in srgb, var(--crm-text-primary) 8%, transparent);
-  }
-
-  .crm-admin-app .crm-sent-notification-row[aria-expanded="true"] {
-    background: color-mix(in srgb, var(--crm-text-primary) 6%, transparent);
-  }
-
-  .crm-admin-app .crm-sent-notification-row:not([aria-expanded="true"]):hover {
-    background: color-mix(in srgb, var(--crm-text-primary) 3%, transparent);
-  }
-
-  .crm-admin-app .crm-user-notification-row[aria-expanded="true"] {
-    background: var(--crm-card);
-  }
-
-  .crm-admin-app .crm-user-notification-row[aria-selected="true"] {
-    background: color-mix(in srgb, var(--crm-accent) 5%, transparent);
-  }
-
-  .crm-admin-app .crm-user-notification-row:not([aria-expanded="true"]):not([aria-selected="true"]):hover {
-    background: color-mix(in srgb, var(--crm-text-primary) 6%, var(--crm-card));
-  }
-
-  .crm-admin-app .crm-notification-recall:hover {
-    background: color-mix(in srgb, var(--crm-ios-red, #FF453A) 14%, transparent);
-  }
-
-  .crm-admin-app .crm-notification-delete:hover {
-    color: var(--crm-ios-red, #FF453A);
-  }
-
-  .crm-admin-app .crm-notification-sent-grid {
-    grid-template-columns: 108px 1fr 140px 90px 110px 50px 110px;
-  }
-
-  .crm-admin-app [data-recalled="true"] {
-    opacity: 0.65;
-  }
-
-  .crm-admin-app [data-broadcast="true"] {
-    color: var(--crm-accent);
-  }
-
-  .crm-admin-app [data-broadcast="false"] {
-    color: var(--crm-text-primary);
-  }
-
-  .crm-admin-app .crm-notification-recipient-mode {
-    border: 1px solid var(--crm-border);
-    background: color-mix(in srgb, var(--crm-text-primary) 5%, transparent);
-    color: var(--crm-text-secondary);
-  }
-
-  .crm-admin-app .crm-notification-recipient-mode[aria-pressed="true"] {
-    border-color: var(--crm-accent);
-    background: var(--crm-accent);
-    color: var(--crm-accent-fg, #FFFFFF);
-  }
-
-  .crm-admin-app .crm-notification-result {
-    border: 1px solid;
-  }
-
-  .crm-admin-app .crm-notification-result[data-status="success"] {
-    border-color: color-mix(in srgb, #0ECB81 28%, transparent);
-    background: color-mix(in srgb, #0ECB81 13%, transparent);
-    color: #0ECB81;
-  }
-
-  .crm-admin-app .crm-notification-result[data-status="error"] {
-    border-color: color-mix(in srgb, var(--crm-ios-red, #FF453A) 28%, transparent);
-    background: color-mix(in srgb, var(--crm-ios-red, #FF453A) 13%, transparent);
-    color: var(--crm-ios-red, #FF453A);
-  }
-
-  .crm-admin-app .crm-notification-kind {
-    border: 1px solid color-mix(in srgb, var(--notification-kind-color) 27%, transparent);
-    background: color-mix(in srgb, var(--notification-kind-color) 13%, transparent);
-    color: var(--notification-kind-color);
-  }
-
-  .crm-admin-app .crm-notification-read-status {
-    border: 1px solid;
-  }
-
-  .crm-admin-app .crm-notification-read-status[data-read="true"] {
-    border-color: color-mix(in srgb, var(--crm-text-secondary) 27%, transparent);
-    background: color-mix(in srgb, var(--crm-text-secondary) 13%, transparent);
-    color: var(--crm-text-secondary);
-  }
-
-  .crm-admin-app .crm-notification-read-status[data-read="false"] {
-    border-color: color-mix(in srgb, var(--crm-accent) 27%, transparent);
-    background: color-mix(in srgb, var(--crm-accent) 13%, transparent);
-    color: var(--crm-accent);
-  }
-
-  .crm-admin-app .crm-notification-kind-text {
-    color: var(--notification-kind-color);
-  }
-
-  .crm-admin-app .crm-notification-read-text[data-read="true"] {
-    color: var(--crm-text-secondary);
-  }
-
-  .crm-admin-app .crm-notification-read-text[data-read="false"] {
-    color: var(--crm-accent);
-  }
-
-  .crm-admin-app .crm-notification-preview {
-    border-left: 3px solid var(--notification-kind-color);
-  }
-
-  .crm-admin-app .crm-notification-wipe-btn {
-    border: 1px solid;
-  }
-
-  .crm-admin-app .crm-notification-wipe-btn:not(:disabled) {
-    border-color: color-mix(in srgb, var(--crm-ios-red, #FF453A) 55%, transparent);
-    background: color-mix(in srgb, var(--crm-ios-red, #FF453A) 15%, transparent);
-    color: var(--crm-ios-red, #FF453A);
-    cursor: pointer;
-  }
-
-  .crm-admin-app .crm-notification-wipe-btn:disabled,
-  .crm-admin-app .crm-notification-delete-selected:disabled {
-    border-color: var(--crm-border);
-    background: var(--crm-card);
-    color: var(--crm-text-muted);
-    cursor: not-allowed;
-  }
-
-  .crm-admin-app .crm-notification-delete-selected:not(:disabled) {
-    border: 1px solid color-mix(in srgb, var(--crm-ios-red, #FF453A) 55%, transparent);
-    background: color-mix(in srgb, var(--crm-ios-red, #FF453A) 12%, transparent);
-    color: var(--crm-ios-red, #FF453A);
-    cursor: pointer;
-  }
-
   .crm-admin-app button:disabled {
-    cursor: not-allowed;
-  }
-
-  .crm-admin-app .crm-notifications-workspace {
-    width: 100%;
-  }
-
-  .crm-admin-app .crm-notification-section {
-    margin-bottom: 20px;
-    padding: 22px 24px;
-    border: 1px solid var(--crm-border);
-    border-radius: var(--crm-ios-radius-card);
-    background: var(--crm-card);
-    box-shadow: var(--crm-ios-shadow-card);
-  }
-
-  .crm-admin-app .crm-notification-section-danger {
-    border-color: color-mix(in srgb, var(--crm-ios-red, #FF453A) 28%, var(--crm-border));
-  }
-
-  .crm-admin-app .crm-notification-section-browse {
-    border-color: var(--crm-border);
-  }
-
-  .crm-admin-app .crm-notification-section-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 16px;
-    color: var(--crm-text-primary);
-    font-size: 16px;
-    font-weight: 700;
-  }
-
-  .crm-admin-app .crm-notification-label {
-    display: block;
-    margin-bottom: 6px;
-    color: var(--crm-text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .crm-admin-app .crm-notification-input,
-  .crm-admin-app .crm-notification-textarea {
-    box-sizing: border-box;
-    width: 100%;
-    border: 1px solid var(--crm-border);
-    border-radius: var(--crm-ios-radius-control);
-    background: var(--crm-input-bg);
-    color: var(--crm-text-primary);
-    font-size: 13px;
-  }
-
-  .crm-admin-app .crm-notification-input {
-    padding: 9px 12px;
-  }
-
-  .crm-admin-app .crm-notification-textarea {
-    min-height: 90px;
-    padding: 10px 12px;
-    font-family: inherit;
-    resize: vertical;
-  }
-
-  .crm-admin-app .crm-notification-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    border: 1px solid var(--crm-border);
-    border-radius: var(--crm-ios-radius-pill);
-    background: color-mix(in srgb, var(--crm-text-primary) 6%, transparent);
-    color: var(--crm-text-primary);
-    font-size: 12px;
-  }
-
-  .crm-admin-app .crm-notification-pill-remove {
-    padding: 0 2px;
-    border: 0;
-    background: transparent;
-    color: var(--crm-text-secondary);
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 1;
-  }
-
-  .crm-admin-app .crm-notification-pill-remove:hover {
-    color: var(--crm-ios-red, #FF453A);
-  }
-
-  .crm-admin-app .crm-notification-dropdown-wrap {
-    position: relative;
-  }
-
-  .crm-admin-app .crm-notification-dropdown-list {
-    position: absolute;
-    z-index: 99;
-    top: 100%;
-    right: 0;
-    left: 0;
-    max-height: 200px;
-    margin-top: 4px;
-    overflow-y: auto;
-    border: 1px solid var(--crm-border);
-    border-radius: var(--crm-ios-radius-card);
-    background: var(--crm-card);
-    box-shadow: var(--crm-ios-shadow-card);
-  }
-
-  .crm-admin-app .crm-notification-client-option {
-    padding: 9px 12px;
-    border-bottom: 1px solid color-mix(in srgb, var(--crm-border) 72%, transparent);
-    color: var(--crm-text-primary);
-    cursor: pointer;
-    font-size: 13px;
-  }
-
-  .crm-admin-app .crm-notification-client-option-spread {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .crm-admin-app .crm-notification-client-option.is-muted {
-    color: var(--crm-text-secondary);
-    cursor: default;
-  }
-
-  .crm-admin-app .crm-notifications-send-btn {
-    width: 100%;
-    margin-top: 14px;
-    padding: 10px 24px;
-    border: 0;
-    border-radius: var(--crm-ios-radius-pill);
-    background: var(--crm-accent);
-    box-shadow: var(--crm-ios-shadow-raised);
-    color: var(--crm-accent-fg, #FFFFFF);
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
-  }
-
-  .crm-admin-app .crm-notifications-send-btn:disabled {
-    background: color-mix(in srgb, var(--crm-text-primary) 6%, transparent);
-    box-shadow: none;
-    color: var(--crm-text-muted);
     cursor: not-allowed;
   }
 
@@ -976,10 +665,6 @@
   }
 
   @media (max-width: 480px) {
-    .crm-admin-app .crm-notification-section {
-      padding: 16px;
-    }
-
     .crm-admin-app .crm-topbar {
       padding-inline: 14px;
     }

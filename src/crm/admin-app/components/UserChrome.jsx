@@ -20,7 +20,6 @@ import {
   Sliders,
   CheckCircle2,
   AlertCircle,
-  Fingerprint,
   Shield,
   Clock,
   Sparkles,
@@ -29,81 +28,10 @@ import { ROLE } from '../shared';
 import {
   adminLogout,
   getAdminToken,
-  getAdminUnreadMessageCounts,
-  getAdminNotificationsUnread,
-  markAllAdminNotificationsRead,
-  markAllAdminMessagesRead,
   updateStaffApi,
   getAdminPendingCounts,
 } from '../adminApi';
-import { usePlatformSettings } from '../../platformDefaults';
 import { crmClassName } from "../styleHelpers.js";
-
-const POLL_INTERVAL_MS = 30_000;
-
-function useAdminUnreadCounts(messagesEnabled, notificationsEnabled) {
-  const [counts, setCounts] = useState({ messages: 0, notifications: 0 });
-  const msgUserIds  = useRef([]);
-  const prevTotal   = useRef(0);
-  const [ring, setRing]       = useState(false);
-  const [clearing, setClearing] = useState(false);
-
-  const poll = useCallback(async () => {
-    if (!messagesEnabled && !notificationsEnabled) return;
-    try {
-      const [msg, notif] = await Promise.all([
-        messagesEnabled ? getAdminUnreadMessageCounts() : Promise.resolve({ counts: {}, total: 0 }),
-        notificationsEnabled ? getAdminNotificationsUnread() : Promise.resolve({ unreadCount: 0 }),
-      ]);
-      const messages      = msg.total || 0;
-      const notifications = notif.unreadCount || 0;
-      const total         = messages + notifications;
-
-      msgUserIds.current = Object.keys(msg.counts || {}).filter(
-        (uid) => (msg.counts[uid] || 0) > 0
-      );
-
-      setCounts({ messages, notifications });
-
-      if (total > prevTotal.current && prevTotal.current >= 0) {
-        setRing(true);
-        setTimeout(() => setRing(false), 1200);
-      }
-      prevTotal.current = total;
-    } catch (_) {}
-  }, [messagesEnabled, notificationsEnabled]);
-
-  useEffect(() => {
-    setCounts((current) => ({
-      messages: messagesEnabled ? current.messages : 0,
-      notifications: notificationsEnabled ? current.notifications : 0,
-    }));
-    if (!messagesEnabled && !notificationsEnabled) return;
-    poll();
-    const id = setInterval(poll, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [messagesEnabled, notificationsEnabled, poll]);
-
-  const markAllRead = useCallback(async () => {
-    if (clearing || (!messagesEnabled && !notificationsEnabled)) return;
-    setClearing(true);
-    try {
-      await Promise.all([
-        notificationsEnabled ? markAllAdminNotificationsRead() : Promise.resolve(),
-        messagesEnabled ? markAllAdminMessagesRead(msgUserIds.current) : Promise.resolve(),
-      ]);
-      setCounts({ messages: 0, notifications: 0 });
-      prevTotal.current = 0;
-    } catch (error) {
-      console.error('[UserChrome] failed to clear unread activity', error);
-    } finally {
-      setClearing(false);
-      poll();
-    }
-  }, [clearing, messagesEnabled, notificationsEnabled, poll]);
-
-  return { counts, ring, marking: clearing, markAllRead };
-}
 
 const ROLE_LOGIN_PATH = {
   [ROLE.SUPER_ADMIN]: '/admin/login/super-admin',
@@ -177,160 +105,6 @@ function LogoutIcon({ size = 14 }) {
   );
 }
 
-function BellIcon({ size = 16 }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      style={{ display: 'block', width: size, height: size, flex: `0 0 ${size}px` }}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
-  );
-}
-
-const ROLE_TAB_MAP = {
-  'Super Admin':    { alerts: 'Notifications', messages: 'Client Management' },
-  'Agent':          { alerts: 'notifications', messages: 'clients' },
-  'Team Leader':    { alerts: 'notifications', messages: 'clients' },
-  'Office Manager': { alerts: 'notifications', messages: 'clients' },
-};
-
-function NotificationBell({ user, messagesEnabled, notificationsEnabled }) {
-  const isAuthed = Boolean(user && getAdminToken());
-  const isSuperAdmin = user?.role === ROLE.SUPER_ADMIN;
-  const canReadMessages = isSuperAdmin || messagesEnabled;
-  const canReadNotifications = isSuperAdmin || notificationsEnabled;
-  const { counts, ring, marking, markAllRead } = useAdminUnreadCounts(
-    isAuthed && canReadMessages,
-    isAuthed && canReadNotifications
-  );
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const navigate = useNavigate();
-  const total = counts.messages + counts.notifications;
-
-  useEffect(() => {
-    if (!isSuperAdmin || !isAuthed) return;
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
-    }
-  }, [isSuperAdmin, isAuthed]);
-
-  const gotoTab = useCallback((kind) => {
-    const tabs = ROLE_TAB_MAP[user?.role] || ROLE_TAB_MAP['Agent'];
-    const tab  = kind === 'alerts' ? tabs.alerts : tabs.messages;
-    window.dispatchEvent(new CustomEvent('admin:goto-tab', { detail: { tab } }));
-    setOpen(false);
-  }, [user?.role]);
-
-  const settings    = usePlatformSettings();
-  const baseTitle   = `${settings.platformName || 'Codex Dynamics'} Admin`;
-
-  useEffect(() => {
-    if (!isAuthed) return;
-    document.title = total > 0 ? `(${total}) ${baseTitle}` : baseTitle;
-    return () => { document.title = baseTitle; };
-  }, [total, baseTitle, isAuthed]);
-
-  useEffect(() => {
-    function onClickOutside(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, []);
-
-  if (!isAuthed || (!canReadMessages && !canReadNotifications)) return null;
-
-  return (
-    <div className="crm-notif-bell-wrap" ref={ref}>
-      <button
-        type="button"
-        className={`crm-notif-bell-btn${ring ? ' crm-notif-bell-ring' : ''}`}
-        onClick={() => setOpen((o) => !o)}
-        title="Notifications"
-        aria-label={total > 0 ? `${total} unread` : 'Notifications'}
-      >
-        <BellIcon size={15} />
-        {total > 0 && (
-          <span className="crm-notif-badge" aria-hidden="true">
-            {total > 99 ? '99+' : total}
-          </span>
-        )}
-      </button>
-
-      {open && (
-        <div className="crm-notif-dropdown" role="dialog" aria-label="Notifications summary">
-          <div className="crm-notif-dropdown-header">
-            <span className="crm-notif-dropdown-title">Activity</span>
-            {total > 0 && <span className="crm-notif-dropdown-count">{total} unread</span>}
-          </div>
-          <div className="crm-notif-dropdown-body">
-            {canReadMessages && <div
-              className={crmClassName(`crm-notif-row${counts.messages > 0 ? ' is-unread' : ''}`, "crm-inline-8410c989c9")}
-              onClick={() => gotoTab('messages')}
-
-              title="Go to messages"
-            >
-              <span className="crm-notif-row-icon">💬</span>
-              <span className="crm-notif-row-label">Client messages</span>
-              <span className="crm-notif-row-val">
-                {counts.messages > 0 ? (
-                  <span className="crm-notif-pill">{counts.messages}</span>
-                ) : (
-                  <span className="crm-notif-row-clear">All read</span>
-                )}
-              </span>
-              <span className="crm-inline-fe5d1e2e99">›</span>
-            </div>}
-            {canReadNotifications && <div
-              className={crmClassName(`crm-notif-row${counts.notifications > 0 ? ' is-unread' : ''}`, "crm-inline-8410c989c9")}
-              onClick={() => gotoTab('alerts')}
-
-              title="Go to notifications"
-            >
-              <span className="crm-notif-row-icon">🔔</span>
-              <span className="crm-notif-row-label">System alerts</span>
-              <span className="crm-notif-row-val">
-                {counts.notifications > 0 ? (
-                  <span className="crm-notif-pill">{counts.notifications}</span>
-                ) : (
-                  <span className="crm-notif-row-clear">All read</span>
-                )}
-              </span>
-              <span className="crm-inline-fe5d1e2e99">›</span>
-            </div>}
-          </div>
-          <div className="crm-notif-dropdown-footer">
-            {total > 0 ? (
-              <button
-                type="button"
-                className="crm-notif-mark-all-btn"
-                onClick={markAllRead}
-                disabled={marking}
-              >
-                {marking ? 'Clearing...' : 'Mark all as read'}
-              </button>
-            ) : (
-              <span className="crm-notif-all-clear">All caught up</span>
-            )}
-            <span className="crm-notif-refresh-hint">Refreshes every 30 s</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function getInitials(name) {
   if (!name) return '?';
   const parts = String(name).trim().split(/\s+/);
@@ -338,7 +112,7 @@ function getInitials(name) {
   return (letters || name[0] || '?').slice(0, 2).toUpperCase();
 }
 
-export function UserChrome({ user, data, setData, messagesEnabled, notificationsEnabled }) {
+export function UserChrome({ user, data, setData }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('credentials');
@@ -550,7 +324,6 @@ export function UserChrome({ user, data, setData, messagesEnabled, notifications
 
   return (
     <>
-      <NotificationBell user={user} messagesEnabled={messagesEnabled} notificationsEnabled={notificationsEnabled} />
       <div className="crm-user-chrome">
         <button
           type="button"
@@ -589,7 +362,7 @@ export function UserChrome({ user, data, setData, messagesEnabled, notifications
             style={profileThemeStyle}
           >
             <div
-              className="crm-profile-modal"
+              className="crm-profile-modal crm-admin-profile-modal"
               onClick={(e) => e.stopPropagation()}
               role="dialog"
               aria-modal="true"
@@ -615,7 +388,6 @@ export function UserChrome({ user, data, setData, messagesEnabled, notifications
                   <div className="crm-profile-title-block">
                     <div className="crm-profile-name-row">
                       <h3 className="crm-profile-user-name">{user.name}</h3>
-                      <span className="crm-profile-id-chip">#{user.id}</span>
                     </div>
 
                     <div className="crm-profile-clearance-meta">
@@ -823,10 +595,6 @@ export function UserChrome({ user, data, setData, messagesEnabled, notifications
                         <div className="crm-inline-fe4ffe5254">
                           <Shield size={12} className="crm-inline-d29419ed51" />
                           <span>TLS 1.3 · Encrypted Auth Token</span>
-                        </div>
-                        <div className="crm-inline-fe4ffe5254">
-                          <Fingerprint size={12} className="crm-inline-7ff77f848d" />
-                          <span>Session ID: #{user.id}</span>
                         </div>
                       </div>
                     </div>
