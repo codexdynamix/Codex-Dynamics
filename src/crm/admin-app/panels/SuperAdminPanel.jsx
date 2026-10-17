@@ -939,20 +939,22 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
       </div>
 
       {/* View toggle: Active | Bin */}
-      <div className="crm-inline-dbe2af6058">
+      <div className="crm-inline-dbe2af6058 crm-client-view-toggle" role="group" aria-label="Client list view">
         <button
-          className={`crm-super-admin-btn crm-super-admin-btn-small${view === 'active' ? '' : ' crm-super-admin-btn-secondary'}`}
+          className={`crm-client-view-option${view === 'active' ? ' is-active' : ''}`}
           onClick={() => setView('active')}
-          style={view === 'active' ? { background: 'var(--crm-accent, #0A84FF)', color: '#fff', borderColor: 'transparent' } : {}}
+          aria-pressed={view === 'active'}
         >
-          Active Clients ({data.clients.length})
+          <span>Active Clients</span>
+          <span className="crm-client-view-count">{data.clients.length}</span>
         </button>
         <button
-          className={`crm-super-admin-btn crm-super-admin-btn-small${view === 'bin' ? '' : ' crm-super-admin-btn-secondary'}`}
+          className={`crm-client-view-option${view === 'bin' ? ' is-active' : ''}`}
           onClick={() => setView('bin')}
-          style={view === 'bin' ? { background: '#F6465D', color: '#fff', borderColor: 'transparent' } : {}}
+          aria-pressed={view === 'bin'}
         >
-          Recycle Bin ({deletedClients.length})
+          <span>Recycle Bin</span>
+          <span className="crm-client-view-count">{deletedClients.length}</span>
         </button>
       </div>
 
