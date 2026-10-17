@@ -3486,6 +3486,8 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
                 <label className="crm-toggle-switch" title="Toggle Client Self-Registration">
                   <input
                     type="checkbox"
+                    role="switch"
+                    aria-label="Enable client self-registration"
                     checked={siteConfig.security.registrationEnabled}
                     onChange={() => updateNestedField('security', 'registrationEnabled', !siteConfig.security.registrationEnabled)}
                   />
@@ -3506,6 +3508,8 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
                 <label className="crm-toggle-switch" title="Toggle Two-Factor Authentication">
                   <input
                     type="checkbox"
+                    role="switch"
+                    aria-label="Require two-factor authentication"
                     checked={siteConfig.security.twoFactorAuthEnabled}
                     onChange={() => updateNestedField('security', 'twoFactorAuthEnabled', !siteConfig.security.twoFactorAuthEnabled)}
                   />
