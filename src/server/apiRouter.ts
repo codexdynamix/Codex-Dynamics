@@ -2144,19 +2144,97 @@ apiRouter.all('/admin/presence', (_req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 // 11. CRM & SITE SETTINGS
 // ---------------------------------------------------------------------------
-const handleSettings = async (req: Request, res: Response) => {
-  const settingsCol = getMongoCollection('platform_settings');
-  if (req.method === 'POST') {
-    await settingsCol.updateOne({}, { $set: req.body }, { upsert: true });
-    const saved = await settingsCol.findOne({});
-    return res.json({ ok: true, settings: saved });
+function settingsResponse(record: Record<string, any>) {
+  const { _id: _recordId, site_config: siteConfig, ...settings } = record;
+  return { settings, site_config: siteConfig ?? null };
+}
+
+function sanitizePublicSiteConfig(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value ?? null;
+  const config = { ...(value as Record<string, any>) };
+  if (config.security && typeof config.security === 'object' && !Array.isArray(config.security)) {
+    config.security = { ...config.security };
+    delete config.security.webhookUrl;
+    delete config.security.webhook_url;
   }
-  const current = (await settingsCol.findOne({})) || {};
-  res.json({ ok: true, settings: current });
+  delete config.webhookUrl;
+  delete config.webhook_url;
+  return config;
+}
+
+apiRouter.get('/crm/settings', async (_req: Request, res: Response) => {
+  const record = (await getMongoCollection('platform_settings').findOne({})) || {};
+  const { settings, site_config: siteConfig } = settingsResponse(record);
+  delete settings.webhook;
+  delete settings.webhookUrl;
+  delete settings.webhook_url;
+  delete settings.allowedOrigins;
+  res.json({ ok: true, settings, site_config: sanitizePublicSiteConfig(siteConfig) });
+});
+
+apiRouter.all('/crm/settings', (_req: Request, res: Response) => {
+  res.status(405).json({ ok: false, error: 'Method not allowed.' });
+});
+
+apiRouter.get('/admin/settings', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const record = (await getMongoCollection('platform_settings').findOne({})) || {};
+  res.json({ ok: true, ...settingsResponse(record) });
+});
+
+const saveAdminSettings = async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+
+  const body = req.body || {};
+  const hasSiteConfig = Object.prototype.hasOwnProperty.call(body, 'site_config');
+  const settings = body.settings;
+  if (settings !== undefined && (!settings || typeof settings !== 'object' || Array.isArray(settings))) {
+    return res.status(400).json({ ok: false, error: 'Settings must be a JSON object.' });
+  }
+  if (hasSiteConfig && body.site_config !== null
+    && (!body.site_config || typeof body.site_config !== 'object' || Array.isArray(body.site_config))) {
+    return res.status(400).json({ ok: false, error: 'Site configuration must be a JSON object or null.' });
+  }
+
+  const settingEntries = Object.entries(settings || {});
+  if (settingEntries.some(([key]) => (
+    !/^[A-Za-z][A-Za-z0-9_]*$/.test(key)
+    || key === 'id'
+    || key === 'site_config'
+    || key === 'webhook'
+  ))) {
+    return res.status(400).json({ ok: false, error: 'Settings contain an invalid field.' });
+  }
+
+  const updates = Object.fromEntries(settingEntries);
+  const changesSiteSettings = hasSiteConfig || settingEntries.some(([key]) => key !== 'crmTheme');
+  if (changesSiteSettings && normalizeAdminRole(staff.role) !== 'Super Admin') {
+    return res.status(403).json({ ok: false, error: 'Only Super Admins can update site settings.' });
+  }
+  if (!settingEntries.length && !hasSiteConfig) {
+    return res.status(400).json({ ok: false, error: 'Settings or site_config must be supplied.' });
+  }
+
+  updates.updatedAt = new Date().toISOString();
+  const update: Record<string, any> = { $set: updates };
+  if (hasSiteConfig) {
+    if (body.site_config === null) update.$unset = { site_config: '' };
+    else updates.site_config = body.site_config;
+  }
+
+  const settingsCol = getMongoCollection('platform_settings');
+  await settingsCol.updateOne({}, update, { upsert: true });
+  const saved = (await settingsCol.findOne({})) || {};
+  res.json({ ok: true, ...settingsResponse(saved) });
 };
 
-apiRouter.all('/admin/settings', handleSettings);
-apiRouter.all('/crm/settings', handleSettings);
+apiRouter.put('/admin/settings', saveAdminSettings);
+apiRouter.post('/admin/settings', saveAdminSettings);
+apiRouter.all('/admin/settings', (_req: Request, res: Response) => {
+  res.status(405).json({ ok: false, error: 'Method not allowed.' });
+});
 
 // ---------------------------------------------------------------------------
 // 12. CLIENT PORTAL OPERATIONS

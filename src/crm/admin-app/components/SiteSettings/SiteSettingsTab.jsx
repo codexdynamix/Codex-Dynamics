@@ -62,6 +62,7 @@ import {
   ChevronUp
 } from 'lucide-react';
 import {
+  DEFAULT_SITE_THEME_PRESET,
   THEME_LAYOUT_PRESETS,
   COLOR_PALETTES,
   generateRandomHarmoniousPalette
@@ -441,16 +442,16 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
       heroBadge: localCfg.hero?.badge || 'Codex Dynamics',
 
       // Branding
-      activeTheme: localCfg.theme?.activeTheme || 'codex-gold',
-      primaryColor: localCfg.colors?.primary || platformSettings?.primaryColor || 'var(--crm-accent)',
-      secondaryColor: localCfg.colors?.secondary || platformSettings?.secondaryColor || '#1E2329',
-      accentColor: localCfg.colors?.accent || platformSettings?.accentColor || 'var(--crm-accent)',
-      backgroundColor: localCfg.colors?.background || platformSettings?.backgroundColor || '#0F1216',
-      cardBg: localCfg.colors?.cardBg || '#181A20',
-      borderRadius: localCfg.theme?.borderRadius || 'clean',
-      fontFamily: localCfg.theme?.fontFamily || 'system',
-      headerStyle: localCfg.theme?.headerStyle || 'floating',
-      heroLayout: localCfg.theme?.heroLayout || 'streamer',
+      activeTheme: localCfg.theme?.activeTheme || DEFAULT_SITE_THEME_PRESET.id,
+      primaryColor: localCfg.colors?.primary || DEFAULT_SITE_THEME_PRESET.primary,
+      secondaryColor: localCfg.colors?.secondary || DEFAULT_SITE_THEME_PRESET.secondary,
+      accentColor: localCfg.colors?.accent || DEFAULT_SITE_THEME_PRESET.accent,
+      backgroundColor: localCfg.colors?.background || DEFAULT_SITE_THEME_PRESET.bg,
+      cardBg: localCfg.colors?.cardBg || DEFAULT_SITE_THEME_PRESET.card,
+      borderRadius: localCfg.theme?.borderRadius || DEFAULT_SITE_THEME_PRESET.borderRadius,
+      fontFamily: localCfg.theme?.fontFamily || DEFAULT_SITE_THEME_PRESET.fontFamily,
+      headerStyle: localCfg.theme?.headerStyle || DEFAULT_SITE_THEME_PRESET.headerStyle,
+      heroLayout: localCfg.theme?.heroLayout || DEFAULT_SITE_THEME_PRESET.heroLayout,
       cardStyle: localCfg.theme?.cardStyle === 'glass' ? 'bordered' : localCfg.theme?.cardStyle || 'bordered',
 
       // Contacts list
@@ -1387,14 +1388,17 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
       heroTitle: 'Precision on every screen.',
       heroSubtitle: 'High-performance websites, custom CRM software, and digital marketing engines.',
       heroBadge: 'Codex Dynamics',
-      primaryColor: 'var(--crm-accent)',
-      secondaryColor: '#1E2329',
-      accentColor: 'var(--crm-accent)',
-      backgroundColor: '#0F1216',
-      cardBg: '#181A20',
-      borderRadius: 'clean',
-      fontFamily: 'system',
-      headerStyle: 'floating',
+      activeTheme: DEFAULT_SITE_THEME_PRESET.id,
+      primaryColor: DEFAULT_SITE_THEME_PRESET.primary,
+      secondaryColor: DEFAULT_SITE_THEME_PRESET.secondary,
+      accentColor: DEFAULT_SITE_THEME_PRESET.accent,
+      backgroundColor: DEFAULT_SITE_THEME_PRESET.bg,
+      cardBg: DEFAULT_SITE_THEME_PRESET.card,
+      borderRadius: DEFAULT_SITE_THEME_PRESET.borderRadius,
+      fontFamily: DEFAULT_SITE_THEME_PRESET.fontFamily,
+      headerStyle: DEFAULT_SITE_THEME_PRESET.headerStyle,
+      heroLayout: DEFAULT_SITE_THEME_PRESET.heroLayout,
+      cardStyle: DEFAULT_SITE_THEME_PRESET.cardStyle,
       socialContacts: [
         { id: 'c-1', type: 'phone', label: 'Direct Line', value: '+380 (63) 640-67-83', isPrimary: true },
         { id: 'c-2', type: 'whatsapp', label: 'WhatsApp Priority', value: '+380636406783', isPrimary: true },

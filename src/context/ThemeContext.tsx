@@ -11,20 +11,20 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: "light",
+  theme: "dark",
   toggleTheme: () => {},
   setTheme: () => {},
-  isDark: false,
+  isDark: true,
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "light";
+    if (typeof window === "undefined") return "dark";
     try {
       const stored = localStorage.getItem(THEME_PREFERENCE_KEY);
       if (stored === "dark" || stored === "light") return stored;
     } catch {}
-    return "light";
+    return "dark";
   });
 
   const applyThemeToDom = useCallback((newTheme: Theme) => {

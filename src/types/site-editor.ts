@@ -326,10 +326,11 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
 
   colors: {
     primary: "#0071e3",
-    background: "#f5f5f7",
-    cardBg: "#ffffff",
-    textMain: "#1d1d1f",
-    textMuted: "#6e6e73",
+    secondary: "#222224",
+    background: "#1c1c1e",
+    cardBg: "#242426",
+    textMain: "#f5f5f7",
+    textMuted: "#b0b0b5",
     accent: "#0071e3",
   },
 
@@ -808,7 +809,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
     headerStyle: "floating",
     heroLayout: "streamer",
     fontSizeScale: "normal",
-    cardStyle: "glass",
+    cardStyle: "bordered",
     activeComponents: [
       "header-builder",
       "hero-clip",

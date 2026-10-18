@@ -1,12 +1,34 @@
 // Curated Theme Layout Presets and Professional Color Palettes
 // Built for Codex Dynamics Site Studio with surgical precision
 
+export const DEFAULT_SITE_THEME_PRESET = {
+  id: 'codex-pro',
+  name: 'Codex Pro',
+  badge: 'Agency Default',
+  category: 'enterprise',
+  desc: 'The current Codex Dynamics design with a matte dark canvas, streamer hero, floating navigation, and electric-blue accents.',
+  isLight: false,
+  heroLayout: 'streamer',
+  headerStyle: 'floating',
+  cardStyle: 'bordered',
+  fontFamily: 'system',
+  borderRadius: 'modern',
+  sectionsOrder: ['hero', 'highlights', 'services', 'portfolio', 'results', 'about', 'blog', 'reviews', 'contact'],
+  primary: '#0071E3',
+  secondary: '#222224',
+  accent: '#0071E3',
+  bg: '#1C1C1E',
+  card: '#242426',
+  layoutTags: ['Streamer Reel', 'Floating Island', 'Modern 36px', 'Matte Bordered'],
+};
+
 export const THEME_LAYOUT_PRESETS = [
-  // ── Dark Themes (16 Presets) ─────────────────────────────────────────────
+  DEFAULT_SITE_THEME_PRESET,
+  // ── Dark Themes (17 Presets) ─────────────────────────────────────────────
   {
     id: 'codex-gold',
     name: 'Codex Pro Gold',
-    badge: 'Agency Default',
+    badge: 'Gold Edition',
     category: 'luxury',
     desc: 'High-impact dark luxury agency aesthetic with cinematic streamer video reel, floating island nav, and gold accents.',
     isLight: false,
@@ -1293,7 +1315,20 @@ export const THEME_LAYOUT_PRESETS = [
 
 // ── Curated Professional Color Palettes (40+ Palettes inspired by Coolors) ──
 export const COLOR_PALETTES = [
-  // ── Dark & Stealth (14 Palettes) ──────────────────────────────────────────
+  // ── Dark & Stealth (15 Palettes) ──────────────────────────────────────────
+  {
+    id: 'pal-codex-pro',
+    name: 'Codex Pro Blue',
+    category: 'dark',
+    isLight: false,
+    contrastLevel: 'AA',
+    primary: '#0071E3',
+    bg: '#1C1C1E',
+    card: '#242426',
+    accent: '#0071E3',
+    secondary: '#222224',
+    tags: ['Codex Dynamics', 'Matte Dark', 'Agency Default'],
+  },
   {
     id: 'pal-codex-gold',
     name: 'Codex Gold Stealth',
