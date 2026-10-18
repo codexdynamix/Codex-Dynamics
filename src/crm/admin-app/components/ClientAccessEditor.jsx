@@ -3,6 +3,7 @@ import { getClientAccessAdmin, saveClientAccessAdmin } from '../adminApi.js';
 
 const emptyAccess = {
   websiteUrl: '',
+  publicWebsiteUrl: '',
   websiteUsername: '',
   emailAddress: '',
   webmailUrl: '',
@@ -74,6 +75,9 @@ export default function ClientAccessEditor({ clientId, showNotification, canEdit
           Clients will see a direct sign-in link and their login details in the portal.
         </p>
         <div className="crm-inline-e27462082f">
+          <Field label="Public website URL">
+            <input disabled={!canEdit} className="crm-themed-form-control crm-themed-form-control--access" type="url" value={access.publicWebsiteUrl} onChange={(e) => update('publicWebsiteUrl', e.target.value)} placeholder="https://example.com" />
+          </Field>
           <Field label="Back-office link">
             <input disabled={!canEdit} className="crm-themed-form-control crm-themed-form-control--access" type="url" value={access.websiteUrl} onChange={(e) => update('websiteUrl', e.target.value)} placeholder="https://example.com/admin" />
           </Field>

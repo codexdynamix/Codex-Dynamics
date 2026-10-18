@@ -184,6 +184,48 @@ class MongoService {
 
 MongoService::init($mongoUri, $mongoDbName);
 
+function clientAccessEncryptionKey(): string {
+    $source = (string)($GLOBALS['mongoUri'] ?? '');
+    if ($source === '') {
+        jsonOut(['ok' => false, 'error' => 'Client access storage is unavailable.'], 503);
+    }
+    return hash('sha256', 'codex-dynamics-client-access:' . $source, true);
+}
+
+function encryptClientAccessSecret(string $value): ?array {
+    if ($value === '') return null;
+    $iv = random_bytes(12);
+    $tag = '';
+    $encrypted = openssl_encrypt($value, 'aes-256-gcm', clientAccessEncryptionKey(), OPENSSL_RAW_DATA, $iv, $tag);
+    if ($encrypted === false) {
+        jsonOut(['ok' => false, 'error' => 'Could not encrypt client access data.'], 500);
+    }
+    return [
+        'version' => '1',
+        'iv' => base64_encode($iv),
+        'tag' => base64_encode($tag),
+        'data' => base64_encode($encrypted),
+    ];
+}
+
+function decryptClientAccessSecret(mixed $value): string {
+    if (is_object($value)) $value = (array)$value;
+    if (!is_array($value) || ($value['version'] ?? '') !== '1') return '';
+    $iv = base64_decode((string)($value['iv'] ?? ''), true);
+    $tag = base64_decode((string)($value['tag'] ?? ''), true);
+    $encrypted = base64_decode((string)($value['data'] ?? ''), true);
+    if ($iv === false || $tag === false || $encrypted === false) {
+        error_log('[client-access] Saved access data is malformed.');
+        jsonOut(['ok' => false, 'error' => 'Saved client access data could not be decrypted.'], 500);
+    }
+    $decrypted = openssl_decrypt($encrypted, 'aes-256-gcm', clientAccessEncryptionKey(), OPENSSL_RAW_DATA, $iv, $tag);
+    if ($decrypted === false) {
+        error_log('[client-access] Saved access data could not be decrypted.');
+        jsonOut(['ok' => false, 'error' => 'Saved client access data could not be decrypted.'], 500);
+    }
+    return $decrypted;
+}
+
 function hostingerMailApiRequest(string $token, string $endpoint = '/api/v1/me'): array {
     $context = stream_context_create([
         'http' => [
@@ -1406,6 +1448,90 @@ if (preg_match('#^/admin/client-mailboxes/([^/]+)/reassign$#', $path, $matches) 
     ]);
 }
 
+if (preg_match('#^/admin/clients/([^/]+)/access$#', $path, $accessMatch)) {
+    $staff = chatStaffFromRequest();
+    $clientId = rawurldecode($accessMatch[1]);
+    if (MongoService::findOne('clients', ['id' => $clientId]) === null) {
+        jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+    }
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+    if ($role !== 'superadmin') {
+        $permissionRecord = MongoService::findOne('client_profile_permissions', ['clientId' => $clientId]);
+        $permissions = $permissionRecord['permissions'] ?? [];
+        if (is_object($permissions)) $permissions = (array)$permissions;
+        $accessPermission = is_array($permissions) ? (string)($permissions['access'] ?? '') : '';
+        $allowed = $method === 'GET'
+            ? in_array($accessPermission, ['read', 'edit'], true)
+            : $method === 'PUT' && $accessPermission === 'edit';
+        if (!$allowed) {
+            jsonOut(['ok' => false, 'error' => 'You do not have permission to manage this client access section.'], 403);
+        }
+    }
+    $record = MongoService::findOne('client_access', ['clientId' => $clientId]);
+    if ($method === 'GET') {
+        $access = $record === null ? null : [
+            'websiteUrl' => (string)($record['websiteUrl'] ?? ''),
+            'publicWebsiteUrl' => (string)($record['publicWebsiteUrl'] ?? ''),
+            'websiteUsername' => (string)($record['websiteUsername'] ?? ''),
+            'emailAddress' => (string)($record['emailAddress'] ?? ''),
+            'webmailUrl' => (string)($record['webmailUrl'] ?? ''),
+            'imapHost' => (string)($record['imapHost'] ?? 'imap.hostinger.com'),
+            'imapPort' => (int)($record['imapPort'] ?? 993),
+            'smtpHost' => (string)($record['smtpHost'] ?? 'smtp.hostinger.com'),
+            'smtpPort' => (int)($record['smtpPort'] ?? 465),
+            'hasWebsitePassword' => !empty($record['websitePassword']),
+            'hasEmailPassword' => !empty($record['emailPassword']),
+        ];
+        jsonOut(['ok' => true, 'access' => $access]);
+    }
+    if ($method !== 'PUT') jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+
+    $updates = [];
+    foreach (['websiteUrl', 'publicWebsiteUrl', 'websiteUsername', 'emailAddress', 'webmailUrl', 'imapHost', 'smtpHost'] as $field) {
+        $value = trim((string)($body[$field] ?? ''));
+        if (strlen($value) > 500) jsonOut(['ok' => false, 'error' => "{$field} is too long."], 422);
+        $updates[$field] = $value;
+    }
+    foreach (['websiteUrl', 'publicWebsiteUrl', 'webmailUrl'] as $field) {
+        if ($updates[$field] === '') continue;
+        $scheme = strtolower((string)(parse_url($updates[$field], PHP_URL_SCHEME) ?? ''));
+        if (!filter_var($updates[$field], FILTER_VALIDATE_URL) || !in_array($scheme, ['http', 'https'], true)) {
+            jsonOut(['ok' => false, 'error' => "{$field} must be a valid HTTP or HTTPS URL."], 422);
+        }
+    }
+    if ($updates['emailAddress'] !== '' && !filter_var($updates['emailAddress'], FILTER_VALIDATE_EMAIL)) {
+        jsonOut(['ok' => false, 'error' => 'Email address is invalid.'], 422);
+    }
+    foreach (['imapPort', 'smtpPort'] as $field) {
+        $port = filter_var($body[$field] ?? null, FILTER_VALIDATE_INT);
+        if ($port === false || $port < 1 || $port > 65535) {
+            jsonOut(['ok' => false, 'error' => "{$field} must be between 1 and 65535."], 422);
+        }
+        $updates[$field] = $port;
+    }
+    $websitePassword = (string)($body['websitePassword'] ?? '');
+    $emailPassword = (string)($body['emailPassword'] ?? '');
+    if (strlen($websitePassword) > 2048 || strlen($emailPassword) > 2048) {
+        jsonOut(['ok' => false, 'error' => 'Passwords cannot exceed 2048 characters.'], 422);
+    }
+    $updates['websitePassword'] = $websitePassword !== ''
+        ? encryptClientAccessSecret($websitePassword)
+        : ($record['websitePassword'] ?? null);
+    $updates['emailPassword'] = $emailPassword !== ''
+        ? encryptClientAccessSecret($emailPassword)
+        : ($record['emailPassword'] ?? null);
+    $updates['clientId'] = $clientId;
+    $updates['updatedAt'] = date('c');
+    $updates['createdAt'] = (string)($record['createdAt'] ?? $updates['updatedAt']);
+    MongoService::updateOneWithOptions(
+        'client_access',
+        ['clientId' => $clientId],
+        $updates,
+        ['upsert' => true]
+    );
+    jsonOut(['ok' => true]);
+}
+
 if ($path === '/admin/clients' && $method === 'POST') {
     $firstName = trim((string)($body['first_name'] ?? $body['firstName'] ?? ''));
     $lastName = trim((string)($body['last_name'] ?? $body['lastName'] ?? ''));
@@ -1934,30 +2060,77 @@ if ($path === '/admin/settings' || $path === '/crm/settings') {
 // 5. Client Portal
 if ($path === '/portal/login' && $method === 'POST') {
     $email = strtolower(trim((string)($body['email'] ?? '')));
-    $client = MongoService::findOne('clients', ['email' => $email]);
-    if (!$client && $email === 'client@codexdynamics.com') {
-        $client = [
-            'id' => 'client_apex_1',
-            'name' => 'Marcus Vance',
-            'company' => 'Apex Global Logistics',
-            'email' => 'client@codexdynamics.com',
-            'phone' => '+44 20 7946 0912',
-            'country' => 'United Kingdom',
-            'countryCode' => 'GB',
-            'status' => 'Active',
-            'portalEnabled' => true,
-            'tier' => 'Enterprise Partner',
-        ];
+    $password = (string)($body['password'] ?? '');
+    if ($email === '' || $password === '') {
+        jsonOut(['ok' => false, 'error' => 'Enter your email address and password.'], 400);
     }
-    if (!$client) {
-        jsonOut(['ok' => false, 'error' => 'Client account not found in MongoDB.'], 401);
+    $escapedEmail = preg_quote($email, '/');
+    $client = MongoService::findOne('clients', [
+        '$or' => [
+            ['email' => $email],
+            ['email' => ['$regex' => '^' . $escapedEmail . '$', '$options' => 'i']],
+        ],
+    ]);
+    if (!$client) jsonOut(['ok' => false, 'error' => 'The email or password is incorrect.'], 401);
+    if (($client['status'] ?? '') === 'Suspended'
+        || !empty($client['deleted_at'])
+        || ($client['is_bin'] ?? false) === true) {
+        jsonOut(['ok' => false, 'error' => 'This client portal account is unavailable. Contact support.'], 403);
     }
+    if (($client['portalEnabled'] ?? $client['portal_enabled'] ?? true) === false
+        || ($client['portalEnabled'] ?? $client['portal_enabled'] ?? true) === 0) {
+        jsonOut(['ok' => false, 'error' => 'Client portal access is disabled. Contact support.'], 403);
+    }
+    $savedPassword = (string)($client['password'] ?? '');
+    if ($savedPassword === '') {
+        jsonOut(['ok' => false, 'error' => 'A portal password has not been set for this account. Contact your account manager.'], 403);
+    }
+    if (!hash_equals($savedPassword, $password)) {
+        jsonOut(['ok' => false, 'error' => 'The email or password is incorrect.'], 401);
+    }
+    $lastLoginAt = date('c');
+    MongoService::updateOne('clients', ['id' => (string)$client['id']], ['lastLoginAt' => $lastLoginAt]);
     $token = 'cdx_portal_php_mongo_' . $client['id'] . '_' . time();
     portalMailSetSessionCookie($token);
     jsonOut([
         'ok' => true,
         'token' => $token,
-        'client' => $client,
+        'client' => [
+            'id' => (string)$client['id'],
+            'name' => (string)($client['name'] ?? $client['company'] ?? 'Client'),
+            'company' => (string)($client['company'] ?? $client['name'] ?? ''),
+            'email' => (string)($client['email'] ?? ''),
+            'phone' => (string)($client['phone'] ?? ''),
+            'address' => (string)($client['address'] ?? ''),
+            'country' => (string)($client['country'] ?? 'United Kingdom'),
+            'countryCode' => (string)($client['countryCode'] ?? ''),
+            'status' => (string)($client['status'] ?? 'Active'),
+            'portalEnabled' => true,
+            'tier' => (string)($client['tier'] ?? 'Enterprise Partner'),
+            'lastLoginAt' => $lastLoginAt,
+            'createdAt' => (string)($client['createdAt'] ?? $client['created_at'] ?? $lastLoginAt),
+        ],
+    ]);
+}
+
+if ($path === '/portal/access' && $method === 'GET') {
+    $client = portalMailClientFromRequest();
+    $clientId = (string)($client['id'] ?? '');
+    if ((string)($_GET['client_id'] ?? '') !== $clientId) {
+        jsonOut(['ok' => false, 'error' => 'You do not have permission to load these access details.'], 403);
+    }
+    $record = MongoService::findOne('client_access', ['clientId' => $clientId]);
+    if ($record === null) jsonOut(['ok' => true, 'access' => null]);
+    jsonOut([
+        'ok' => true,
+        'access' => [
+            'websiteUrl' => (string)($record['websiteUrl'] ?? ''),
+            'websiteUsername' => (string)($record['websiteUsername'] ?? ''),
+            'websitePassword' => decryptClientAccessSecret($record['websitePassword'] ?? null),
+            'emailAddress' => (string)($record['emailAddress'] ?? ''),
+            'webmailUrl' => (string)($record['webmailUrl'] ?? ''),
+            'emailPassword' => decryptClientAccessSecret($record['emailPassword'] ?? null),
+        ],
     ]);
 }
 
@@ -1980,18 +2153,33 @@ if (str_starts_with($path, '/portal/data')) {
             ]],
         ],
     ], 1000) : [];
+    $access = MongoService::findOne('client_access', ['clientId' => $clientId]);
+    $publicWebsiteUrl = (string)($access['publicWebsiteUrl'] ?? '');
+    $website = null;
+    if ($publicWebsiteUrl !== '') {
+        $domain = (string)(parse_url($publicWebsiteUrl, PHP_URL_HOST) ?? '');
+        $website = [
+            'id' => 'website_' . $clientId,
+            'clientId' => $clientId,
+            'name' => (string)($client['company'] ?? $client['name'] ?? 'Website'),
+            'domain' => $domain,
+            'websiteUrl' => $publicWebsiteUrl,
+            'backOfficeUrl' => (string)($access['websiteUrl'] ?? ''),
+            'status' => 'Configured',
+            'connectionStatus' => 'Pending Setup',
+            'connectorId' => '',
+            'accessEnabled' => !empty($access['websiteUrl']),
+            'techStack' => [],
+            'hostingPlan' => 'Not specified',
+            'sslStatus' => str_starts_with(strtolower($publicWebsiteUrl), 'https://') ? 'HTTPS' : 'Not configured',
+            'createdAt' => (string)($access['createdAt'] ?? ''),
+            'updatedAt' => (string)($access['updatedAt'] ?? ''),
+        ];
+    }
     jsonOut([
         'ok' => true,
         'client' => $client,
-        'websites' => [
-            [
-                'id' => 'web_1',
-                'clientId' => $clientId,
-                'name' => 'Apex Global Logistics Platform',
-                'domain' => 'apexlogistics.io',
-                'status' => 'Online',
-            ]
-        ],
+        'websites' => $website === null ? [] : [$website],
         'projects' => $projects,
         'invoices' => [],
         'payments' => [],
@@ -2113,29 +2301,208 @@ if ($path === '/portal/ticket') {
     jsonOut(['ok' => true, 'ticket' => $ticket], 201);
 }
 
-if (str_contains($path, '/portal-password')) {
-    preg_match('#/clients/([^/]+)/portal-password#', $path, $m);
-    $cid = $m[1] ?? '';
-    $client = MongoService::findOne('clients', ['id' => $cid]);
-    jsonOut(['ok' => true, 'password' => $client['password'] ?? 'admin123']);
+if (preg_match('#^/admin/clients/([^/]+)/(portal-password|set-password)$#', $path, $passwordRoute)) {
+    chatStaffFromRequest();
+    $clientId = rawurldecode($passwordRoute[1]);
+    $client = MongoService::findOne('clients', ['id' => $clientId]);
+    if ($client === null) jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+    if ($passwordRoute[2] === 'portal-password' && $method === 'GET') {
+        jsonOut(['ok' => true, 'password' => (string)($client['password'] ?? '')]);
+    }
+    if ($passwordRoute[2] === 'set-password' && $method === 'POST') {
+        $newPassword = (string)($body['new_password'] ?? $body['newPassword'] ?? $body['password'] ?? '');
+        if ($newPassword === '' || strlen($newPassword) > 1024) {
+            jsonOut(['ok' => false, 'error' => 'Password must contain between 1 and 1024 characters.'], 422);
+        }
+        MongoService::updateOne('clients', ['id' => $clientId], ['password' => $newPassword]);
+        jsonOut(['ok' => true, 'message' => 'Client portal password updated.']);
+    }
+    jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
 }
 
 // 6. Accounting & Invoices
-if ($path === '/admin/accounting/overview' || str_starts_with($path, '/admin/accounting/')) {
+if ($path === '/admin/accounting/overview') {
+    chatStaffFromRequest();
+    $clients = array_values(array_map(static function (array $client): array {
+        $firstName = trim((string)($client['first_name'] ?? $client['firstName'] ?? ''));
+        $lastName = trim((string)($client['last_name'] ?? $client['lastName'] ?? ''));
+        return [
+            'id' => (string)($client['id'] ?? ''),
+            'name' => (string)($client['name'] ?? $client['full_name'] ?? trim($firstName . ' ' . $lastName) ?: ($client['company'] ?? '')),
+            'company' => (string)($client['company'] ?? ''),
+            'email' => (string)($client['email'] ?? ''),
+            'phone' => (string)($client['phone'] ?? ''),
+        ];
+    }, array_filter(MongoService::getCollection('clients'), static fn(array $client): bool => empty($client['deleted_at']) && ($client['is_bin'] ?? false) !== true && ($client['in_bin'] ?? false) !== true && ($client['is_deleted'] ?? false) !== true)));
     $invoices = MongoService::getCollection('invoices');
     $payments = MongoService::getCollection('payments');
+    $validPayments = array_values(array_filter($payments, static fn(array $payment): bool => !in_array(strtolower((string)($payment['status'] ?? '')), ['voided', 'cancelled'], true)));
+    $outstanding = array_reduce($invoices, static fn(float $sum, array $invoice): float => $sum + (float)($invoice['balance_due'] ?? $invoice['balanceDue'] ?? 0), 0.0);
     jsonOut([
         'ok' => true,
+        'clients' => array_values(array_filter($clients, static fn(array $client): bool => $client['id'] !== '')),
         'stats' => [
-            'totalRevenue' => 148500,
-            'outstanding' => 12400,
-            'paidCount' => count($payments) ?: 18,
-            'overdueCount' => 1,
+            'totalRevenue' => array_reduce($validPayments, static fn(float $sum, array $payment): float => $sum + (float)($payment['amount'] ?? 0), 0.0),
+            'outstanding' => $outstanding,
+            'paidCount' => count($validPayments),
+            'overdueCount' => count(array_filter($invoices, static fn(array $invoice): bool => strtolower((string)($invoice['status'] ?? '')) === 'overdue')),
         ],
         'invoices' => $invoices,
         'payments' => $payments,
-        'summary' => ['total' => 4800, 'paid' => 4800, 'balance' => 0],
     ]);
+}
+
+if (preg_match('#^/admin/accounting/([^/]+)$#', $path, $accountingMatch)) {
+    $staff = chatStaffFromRequest();
+    $clientId = rawurldecode($accountingMatch[1]);
+    $client = MongoService::findOne('clients', ['id' => $clientId]);
+    if ($client === null) jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+
+    if ($method === 'GET') {
+        $invoices = array_values(array_filter(MongoService::getCollection('invoices'), static fn(array $invoice): bool => (string)($invoice['clientId'] ?? $invoice['client_id'] ?? '') === $clientId));
+        $payments = array_values(array_filter(MongoService::getCollection('payments'), static fn(array $payment): bool => (string)($payment['clientId'] ?? $payment['client_id'] ?? '') === $clientId));
+        $validPayments = array_values(array_filter($payments, static fn(array $payment): bool => !in_array(strtolower((string)($payment['status'] ?? '')), ['voided', 'cancelled'], true)));
+        $total = array_reduce($invoices, static fn(float $sum, array $invoice): float => $sum + (float)($invoice['total'] ?? $invoice['amount'] ?? 0), 0.0);
+        $balance = array_reduce($invoices, static fn(float $sum, array $invoice): float => $sum + (float)($invoice['balance_due'] ?? $invoice['balanceDue'] ?? 0), 0.0);
+        jsonOut([
+            'ok' => true,
+            'invoices' => $invoices,
+            'payments' => $payments,
+            'client' => ['id' => $clientId, 'name' => (string)($client['name'] ?? $client['company'] ?? ''), 'email' => (string)($client['email'] ?? '')],
+            'summary' => ['total' => $total, 'paid' => array_reduce($validPayments, static fn(float $sum, array $payment): float => $sum + (float)($payment['amount'] ?? 0), 0.0), 'balance' => $balance],
+        ]);
+    }
+
+    if ($method !== 'POST') jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    $recordType = strtolower(trim((string)($body['type'] ?? '')));
+    $currency = strtoupper(trim((string)($body['currency'] ?? 'USD')));
+    if (!preg_match('/^[A-Z]{3}$/', $currency)) jsonOut(['ok' => false, 'error' => 'Currency must be a valid three-letter code.'], 422);
+    $now = date('c');
+    $staffId = (string)($staff['id'] ?? $staff['staff_id'] ?? '');
+
+    if ($recordType === 'invoice') {
+        $sourceItems = $body['lineItems'] ?? null;
+        if (!is_array($sourceItems) || count($sourceItems) < 1 || count($sourceItems) > 100) {
+            jsonOut(['ok' => false, 'error' => 'An invoice must have between 1 and 100 line items.'], 422);
+        }
+        $lineItems = [];
+        foreach ($sourceItems as $source) {
+            if (!is_array($source)) jsonOut(['ok' => false, 'error' => 'Each invoice item must be an object.'], 422);
+            $description = trim((string)($source['description'] ?? ''));
+            $service = trim((string)($source['service'] ?? ''));
+            $quantity = (float)($source['quantity'] ?? 0);
+            $unitPrice = (float)($source['unitPrice'] ?? $source['unit_price'] ?? -1);
+            if ($description === '' || strlen($description) > 300 || strlen($service) > 120 || !is_finite($quantity) || $quantity <= 0 || !is_finite($unitPrice) || $unitPrice < 0 || $unitPrice > 100000000) {
+                jsonOut(['ok' => false, 'error' => 'Each invoice item needs a description, a positive quantity, and a non-negative unit price.'], 422);
+            }
+            $lineItems[] = ['description' => $description, 'service' => $service, 'quantity' => $quantity, 'unitPrice' => round($unitPrice, 2), 'unit_price' => round($unitPrice, 2)];
+        }
+        $taxRate = (float)($body['taxRate'] ?? 0);
+        if (!is_finite($taxRate) || $taxRate < 0 || $taxRate > 100) jsonOut(['ok' => false, 'error' => 'Tax rate must be between 0 and 100 percent.'], 422);
+        $issueDate = trim((string)($body['issueDate'] ?? ''));
+        $dueDate = trim((string)($body['dueDate'] ?? ''));
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $issueDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate)) {
+            jsonOut(['ok' => false, 'error' => 'Valid issue and due dates are required.'], 422);
+        }
+        $subtotal = round(array_reduce($lineItems, static fn(float $sum, array $item): float => $sum + $item['quantity'] * $item['unitPrice'], 0.0), 2);
+        $tax = round($subtotal * $taxRate / 100, 2);
+        $total = round($subtotal + $tax, 2);
+        $status = trim((string)($body['status'] ?? 'Pending'));
+        if (!in_array($status, ['Pending', 'Draft'], true)) jsonOut(['ok' => false, 'error' => 'Invoice status must be Pending or Draft.'], 422);
+        $invoiceNumber = 'CDX-' . date('Y') . '-' . random_int(100000, 999999);
+        $invoice = MongoService::insert('invoices', [
+            'id' => 'inv_' . bin2hex(random_bytes(12)),
+            'clientId' => $clientId,
+            'client_id' => $clientId,
+            'clientName' => (string)($client['name'] ?? $client['company'] ?? ''),
+            'clientEmail' => (string)($client['email'] ?? ''),
+            'invoiceNumber' => $invoiceNumber,
+            'invoice_number' => $invoiceNumber,
+            'lineItems' => $lineItems,
+            'line_items' => $lineItems,
+            'issueDate' => $issueDate,
+            'issue_date' => $issueDate,
+            'dueDate' => $dueDate,
+            'due_date' => $dueDate,
+            'currency' => $currency,
+            'taxRate' => $taxRate,
+            'tax_rate' => $taxRate,
+            'subtotal' => $subtotal,
+            'tax' => $tax,
+            'total' => $total,
+            'amount' => $total,
+            'amountPaid' => 0,
+            'amount_paid' => 0,
+            'balanceDue' => $total,
+            'balance_due' => $total,
+            'status' => $status,
+            'created_at' => $now,
+            'updated_at' => $now,
+            'created_by' => $staffId,
+        ]);
+        jsonOut(['ok' => true, 'invoice' => $invoice], 201);
+    }
+
+    if ($recordType === 'payment') {
+        $amount = round((float)($body['amount'] ?? 0), 2);
+        $paymentDate = trim((string)($body['paymentDate'] ?? ''));
+        $invoiceId = trim((string)($body['invoiceId'] ?? $body['invoice_id'] ?? ''));
+        if (!is_finite($amount) || $amount <= 0) jsonOut(['ok' => false, 'error' => 'Payment amount must be greater than zero.'], 422);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $paymentDate)) jsonOut(['ok' => false, 'error' => 'A valid payment date is required.'], 422);
+        $invoice = null;
+        if ($invoiceId !== '') {
+            $invoice = MongoService::findOne('invoices', ['id' => $invoiceId, 'clientId' => $clientId]);
+            if ($invoice === null) jsonOut(['ok' => false, 'error' => 'The selected invoice was not found for this client.'], 404);
+            $invoiceBalance = (float)($invoice['balance_due'] ?? $invoice['balanceDue'] ?? $invoice['total'] ?? $invoice['amount'] ?? 0);
+            if ($amount > $invoiceBalance + 0.001) jsonOut(['ok' => false, 'error' => 'Payment amount cannot exceed the invoice balance due.'], 422);
+            if ($currency !== strtoupper((string)($invoice['currency'] ?? 'USD'))) jsonOut(['ok' => false, 'error' => 'Payment currency must match the selected invoice.'], 422);
+        }
+        $receiptNumber = 'CDX-R-' . date('Y') . '-' . random_int(100000, 999999);
+        $payment = MongoService::insert('payments', [
+            'id' => 'pay_' . bin2hex(random_bytes(12)),
+            'clientId' => $clientId,
+            'client_id' => $clientId,
+            'clientName' => (string)($client['name'] ?? $client['company'] ?? ''),
+            'clientEmail' => (string)($client['email'] ?? ''),
+            'invoiceId' => $invoiceId,
+            'invoice_id' => $invoiceId,
+            'invoiceNumber' => (string)($invoice['invoice_number'] ?? $invoice['invoiceNumber'] ?? ''),
+            'receiptNumber' => $receiptNumber,
+            'receipt_number' => $receiptNumber,
+            'paymentDate' => $paymentDate,
+            'payment_date' => $paymentDate,
+            'paymentMethod' => trim((string)($body['paymentMethod'] ?? 'Other')),
+            'payment_method' => trim((string)($body['paymentMethod'] ?? 'Other')),
+            'transactionReference' => trim((string)($body['transactionReference'] ?? '')),
+            'transaction_reference' => trim((string)($body['transactionReference'] ?? '')),
+            'description' => trim((string)($body['description'] ?? '')),
+            'amount' => $amount,
+            'currency' => $currency,
+            'status' => 'Completed',
+            'created_at' => $now,
+            'created_by' => $staffId,
+        ]);
+        if ($invoice !== null) {
+            $amountPaid = round((float)($invoice['amount_paid'] ?? $invoice['amountPaid'] ?? 0) + $amount, 2);
+            $invoiceTotal = (float)($invoice['total'] ?? $invoice['amount'] ?? 0);
+            $balanceDue = max(0, round($invoiceTotal - $amountPaid, 2));
+            $invoiceStatus = $balanceDue <= 0 ? 'Paid' : 'Partially paid';
+            MongoService::updateOne('invoices', ['id' => $invoiceId, 'clientId' => $clientId], [
+                'amountPaid' => $amountPaid,
+                'amount_paid' => $amountPaid,
+                'balanceDue' => $balanceDue,
+                'balance_due' => $balanceDue,
+                'status' => $invoiceStatus,
+                'updated_at' => $now,
+            ]);
+            $invoice['amountPaid'] = $invoice['amount_paid'] = $amountPaid;
+            $invoice['balanceDue'] = $invoice['balance_due'] = $balanceDue;
+            $invoice['status'] = $invoiceStatus;
+        }
+        jsonOut(['ok' => true, 'payment' => $payment, 'invoice' => $invoice], 201);
+    }
+
+    jsonOut(['ok' => false, 'error' => 'Accounting record type must be invoice or payment.'], 422);
 }
 
 // 7. Hostinger Mail & Mailboxes
@@ -2794,6 +3161,7 @@ if (preg_match('#^/admin/hostinger/mailboxes/([^/]+)/send-to-client$#', $path, $
     $resourceId = rawurldecode($sendMailMatch[1]);
     $subject = trim((string)($body['subject'] ?? ''));
     $text = trim((string)($body['text'] ?? ''));
+    $html = trim((string)($body['html'] ?? ''));
     if ($resourceId === '') {
         jsonOut(['ok' => false, 'error' => 'A sender mailbox is required.'], 400);
     }
@@ -2802,6 +3170,9 @@ if (preg_match('#^/admin/hostinger/mailboxes/([^/]+)/send-to-client$#', $path, $
     }
     if ($text === '' || strlen($text) > 20000) {
         jsonOut(['ok' => false, 'error' => 'Message must be between 1 and 20000 characters.'], 422);
+    }
+    if (strlen($html) > 50000) {
+        jsonOut(['ok' => false, 'error' => 'HTML message cannot exceed 50000 characters.'], 422);
     }
     $integration = hostingerMailIntegration();
     $token = trim((string)($integration['token'] ?? ''));
@@ -2835,7 +3206,7 @@ if (preg_match('#^/admin/hostinger/mailboxes/([^/]+)/send-to-client$#', $path, $
         $token,
         '/api/v1/mailboxes/' . rawurlencode($resourceId) . '/send',
         'POST',
-        ['to' => [$recipient], 'subject' => $subject, 'text' => $text]
+        ['to' => [$recipient], 'subject' => $subject, 'text' => $text] + ($html !== '' ? ['html' => $html] : [])
     );
     jsonOut([
         'ok' => true,

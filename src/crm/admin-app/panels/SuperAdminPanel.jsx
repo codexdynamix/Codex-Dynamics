@@ -3222,8 +3222,8 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
             ) : activeTab === 'SEO & Search' ? (
               <SiteSettingsTab key="seo" showNotification={showNotification} initialSubTab="seo" standaloneSection />
             ) : activeTab === 'Staff' ? (
-              <div className="crm-inline-0acd0995e2">
-                <div className="crm-tab-row crm-inline-eb7e8501e1" >
+              <div className="crm-staff-workspace">
+                <div className="crm-tab-row crm-staff-workspace-tabs" >
                   <button className={"crm-tab-btn " + (staffSubTab === 'Staff' ? 'crm-active' : '')} onClick={() => setStaffSubTab('Staff')}>
                     Staff
                   </button>
@@ -3729,7 +3729,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
                     </div>
                   </div>
                 ) : (
-                  <div className="crm-inline-0acd0995e2">
+                  <div className="crm-inline-0acd0995e2 crm-staff-directory-content">
                     {showCreateSuperAdmin && (
                       <div className="crm-super-admin-modal-overlay" onClick={() => setShowCreateSuperAdmin(false)}>
                         <form

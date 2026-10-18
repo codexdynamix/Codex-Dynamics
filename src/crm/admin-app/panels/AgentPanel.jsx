@@ -1321,7 +1321,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
               <details className="crm-client-account-panel">
                 <summary>Client Accounting</summary>
                 <div className="crm-inline-2fc162ef25">
-                  <ClientAccountingPanel clientId={client.id} showNotification={showNotification} canEdit={canEditAccountingSection} />
+                  <ClientAccountingPanel clientId={client.id} clientName={client.name || client.company || 'Client'} clientEmail={client.email || ''} showNotification={showNotification} canEdit={canEditAccountingSection} />
                 </div>
               </details>
             )}

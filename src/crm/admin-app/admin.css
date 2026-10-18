@@ -1742,6 +1742,11 @@
   overflow: hidden;
 }
 
+/* Keep the staff sub-sections visually connected to their tabs and each other. */
+.crm-admin-app.crm-admin-app .crm-staff-workspace {
+  padding: 0 0 8px;
+}
+
 /* Table row underline animation - removed */
 .crm-admin-app .crm-super-admin-table tbody tr::after {
   display: none;

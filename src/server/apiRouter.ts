@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getMongoCollection, isMongoConnected, getDatabaseName } from './mongo.ts';
@@ -8,6 +8,38 @@ import { SEED_STAFF } from './seedData.ts';
 import { normalizeAdminRole } from '../crm/roleNormalization.js';
 
 export const apiRouter = Router();
+
+function clientAccessEncryptionKey(): Buffer {
+  const source = process.env.MONGODB_URI;
+  if (!source) throw Object.assign(new Error('Client access storage is unavailable.'), { status: 503 });
+  return createHash('sha256').update(`codex-dynamics-client-access:${source}`).digest();
+}
+function encryptClientAccessSecret(value: string): Record<string, string> | null {
+  if (!value) return null;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', clientAccessEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return {
+    version: '1',
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    data: encrypted.toString('base64'),
+  };
+}
+function decryptClientAccessSecret(value: any): string {
+  if (!value || value.version !== '1') return '';
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', clientAccessEncryptionKey(), Buffer.from(value.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(value.tag, 'base64'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(value.data, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
+  } catch (error) {
+    console.error('Could not decrypt saved client access data.', error);
+    throw Object.assign(new Error('Saved client access data could not be decrypted.'), { status: 500 });
+  }
+}
 
 function setPortalSessionCookie(req: Request, res: Response, token: string) {
   const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
@@ -790,14 +822,24 @@ apiRouter.post('/admin/clients/:id/impersonate', async (req: Request, res: Respo
 });
 
 apiRouter.all('/admin/clients/:id/portal-password', async (req: Request, res: Response) => {
+  if (!(await requireChatStaff(req, res))) return;
   const client = await getMongoCollection('clients').findOne({ id: req.params.id });
-  res.json({ ok: true, password: client?.password || 'admin123' });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  res.json({ ok: true, password: client.password || '' });
 });
 
 apiRouter.post('/admin/clients/:id/set-password', async (req: Request, res: Response) => {
-  const newPass = req.body.password || req.body.newPassword || 'admin123';
-  await getMongoCollection('clients').updateOne({ id: req.params.id }, { $set: { password: newPass } });
-  res.json({ ok: true, password: newPass, message: 'Password updated in MongoDB.' });
+  if (!(await requireChatStaff(req, res))) return;
+  const newPass = String(req.body?.new_password ?? req.body?.newPassword ?? req.body?.password ?? '');
+  if (!newPass || newPass.length > 1024) {
+    return res.status(422).json({ ok: false, error: 'Password must contain between 1 and 1024 characters.' });
+  }
+  const result = await getMongoCollection('clients').updateOne(
+    { id: req.params.id },
+    { $set: { password: newPass } },
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  res.json({ ok: true, message: 'Client portal password updated.' });
 });
 
 const clientAssignmentFieldAliases: Record<string, string[]> = {
@@ -1403,42 +1445,201 @@ apiRouter.post('/admin/settings/webhook-test', (_req: Request, res: Response) =>
 // ---------------------------------------------------------------------------
 // 7. ACCOUNTING & INVOICES
 // ---------------------------------------------------------------------------
-apiRouter.get('/admin/accounting/overview', async (_req: Request, res: Response) => {
-  const [invoices, payments] = await Promise.all([
+apiRouter.get('/admin/accounting/overview', async (req: Request, res: Response) => {
+  if (!(await requireAdminStaff(req, res))) return;
+  const [allClients, invoices, payments] = await Promise.all([
+    getMongoCollection('clients').find(),
     getMongoCollection('invoices').find(),
     getMongoCollection('payments').find(),
   ]);
+  const clients = allClients
+    .filter((client) => client.deleted_at == null && client.is_bin !== true && client.in_bin !== true && client.is_deleted !== true)
+    .map((client) => {
+      const firstName = String(client.first_name || client.firstName || '').trim();
+      const lastName = String(client.last_name || client.lastName || '').trim();
+      return {
+        id: String(client.id || ''),
+        name: String(client.name || client.full_name || [firstName, lastName].filter(Boolean).join(' ') || client.company || ''),
+        company: String(client.company || ''),
+        email: String(client.email || ''),
+        phone: String(client.phone || ''),
+      };
+    })
+    .filter((client) => client.id);
+  const validPayments = payments.filter((payment) => !['voided', 'cancelled'].includes(String(payment.status || '').toLowerCase()));
   res.json({
     ok: true,
     stats: {
-      totalRevenue: payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0) || 148500,
-      outstanding: invoices.filter((i) => i.status === 'Unpaid').reduce((acc, i) => acc + (Number(i.amount) || 0), 0) || 12400,
-      paidCount: payments.length || 18,
-      overdueCount: invoices.filter((i) => i.status === 'Overdue').length || 1,
+      totalRevenue: validPayments.reduce((acc, payment) => acc + (Number(payment.amount) || 0), 0),
+      outstanding: invoices.reduce((acc, invoice) => acc + (Number(invoice.balance_due ?? invoice.balanceDue) || 0), 0),
+      paidCount: validPayments.length,
+      overdueCount: invoices.filter((invoice) => String(invoice.status || '').toLowerCase() === 'overdue').length,
     },
+    clients,
     invoices,
     payments,
   });
 });
 
 apiRouter.post('/admin/accounting/recurring/invoice-due', async (req: Request, res: Response) => {
-  const newInv = { ...req.body, id: `inv_${Date.now()}`, status: 'Unpaid', created_at: new Date().toISOString() };
-  await getMongoCollection('invoices').insertOne(newInv);
-  res.json({ ok: true, invoice: newInv });
+  const staff = await requireAdminStaff(req, res);
+  if (!staff) return;
+  return res.status(501).json({ ok: false, error: 'Recurring invoice generation is not available until the client service records are configured.' });
 });
 
-apiRouter.all('/admin/accounting/:clientId', async (req: Request, res: Response) => {
+apiRouter.get('/admin/accounting/:clientId', async (req: Request, res: Response) => {
+  const staff = await requireAdminStaff(req, res);
+  if (!staff) return;
   const clientId = req.params.clientId;
+  const client = await getMongoCollection('clients').findOne({ id: clientId });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
   const [invoices, payments] = await Promise.all([
-    getMongoCollection('invoices').find({ clientId }),
-    getMongoCollection('payments').find({ clientId }),
+    getMongoCollection('invoices').find({ $or: [{ clientId }, { client_id: clientId }] }),
+    getMongoCollection('payments').find({ $or: [{ clientId }, { client_id: clientId }] }),
   ]);
+  const validPayments = payments.filter((payment) => !['voided', 'cancelled'].includes(String(payment.status || '').toLowerCase()));
+  const total = invoices.reduce((sum, invoice) => sum + (Number(invoice.total ?? invoice.amount) || 0), 0);
+  const balance = invoices.reduce((sum, invoice) => sum + (Number(invoice.balance_due ?? invoice.balanceDue) || 0), 0);
   res.json({
     ok: true,
     invoices,
     payments,
-    summary: { total: 4800, paid: 4800, balance: 0 },
+    client: { id: clientId, name: client.name || client.company || '', email: client.email || '' },
+    summary: { total, paid: validPayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0), balance },
   });
+});
+
+apiRouter.post('/admin/accounting/:clientId', async (req: Request, res: Response) => {
+  const staff = await requireAdminStaff(req, res);
+  if (!staff) return;
+  const clientId = String(req.params.clientId || '').trim();
+  const client = await getMongoCollection('clients').findOne({ id: clientId });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  const recordType = String(req.body?.type || '').toLowerCase();
+  const now = new Date().toISOString();
+  const currency = String(req.body?.currency || 'USD').toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) return res.status(422).json({ ok: false, error: 'Currency must be a valid three-letter code.' });
+
+  if (recordType === 'invoice') {
+    const sourceItems = req.body?.lineItems;
+    if (!Array.isArray(sourceItems) || sourceItems.length < 1 || sourceItems.length > 100) {
+      return res.status(422).json({ ok: false, error: 'An invoice must have between 1 and 100 line items.' });
+    }
+    const lineItems = [];
+    for (const source of sourceItems) {
+      const description = String(source?.description || '').trim();
+      const service = String(source?.service || '').trim();
+      const quantity = Number(source?.quantity);
+      const unitPrice = Number(source?.unitPrice ?? source?.unit_price);
+      if (!description || description.length > 300 || service.length > 120 || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || unitPrice > 100000000) {
+        return res.status(422).json({ ok: false, error: 'Each invoice item needs a description, a positive quantity, and a non-negative unit price.' });
+      }
+      lineItems.push({ description, service, quantity, unitPrice: Math.round(unitPrice * 100) / 100, unit_price: Math.round(unitPrice * 100) / 100 });
+    }
+    const taxRate = Number(req.body?.taxRate || 0);
+    if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
+      return res.status(422).json({ ok: false, error: 'Tax rate must be between 0 and 100 percent.' });
+    }
+    const issueDate = String(req.body?.issueDate || '').trim();
+    const dueDate = String(req.body?.dueDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(issueDate) || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+      return res.status(422).json({ ok: false, error: 'Valid issue and due dates are required.' });
+    }
+    const subtotal = Math.round(lineItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) * 100) / 100;
+    const tax = Math.round(subtotal * taxRate) / 100;
+    const total = Math.round((subtotal + tax) * 100) / 100;
+    const status = String(req.body?.status || 'Pending');
+    if (!['Pending', 'Draft'].includes(status)) return res.status(422).json({ ok: false, error: 'Invoice status must be Pending or Draft.' });
+    const invoiceNumber = `CDX-${new Date().getFullYear()}-${randomInt(100000, 1000000)}`;
+    const invoice = {
+      id: randomUUID(),
+      clientId,
+      client_id: clientId,
+      clientName: String(client.name || client.company || ''),
+      clientEmail: String(client.email || ''),
+      invoiceNumber,
+      invoice_number: invoiceNumber,
+      lineItems,
+      line_items: lineItems,
+      issueDate,
+      issue_date: issueDate,
+      dueDate,
+      due_date: dueDate,
+      currency,
+      taxRate,
+      tax_rate: taxRate,
+      subtotal,
+      tax,
+      total,
+      amount: total,
+      amountPaid: 0,
+      amount_paid: 0,
+      balanceDue: total,
+      balance_due: total,
+      status,
+      created_at: now,
+      updated_at: now,
+      created_by: staff.id,
+    };
+    await getMongoCollection('invoices').insertOne(invoice);
+    return res.status(201).json({ ok: true, invoice });
+  }
+
+  if (recordType === 'payment') {
+    const amount = Math.round(Number(req.body?.amount) * 100) / 100;
+    const paymentDate = String(req.body?.paymentDate || '').trim();
+    const invoiceId = String(req.body?.invoiceId || req.body?.invoice_id || '').trim();
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(422).json({ ok: false, error: 'Payment amount must be greater than zero.' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) return res.status(422).json({ ok: false, error: 'A valid payment date is required.' });
+    let invoice = null;
+    if (invoiceId) {
+      invoice = await getMongoCollection('invoices').findOne({ id: invoiceId, clientId });
+      if (!invoice) return res.status(404).json({ ok: false, error: 'The selected invoice was not found for this client.' });
+      const balance = Number(invoice.balance_due ?? invoice.balanceDue ?? invoice.total ?? invoice.amount) || 0;
+      if (amount > balance + 0.001) return res.status(422).json({ ok: false, error: 'Payment amount cannot exceed the invoice balance due.' });
+      if (currency !== String(invoice.currency || 'USD').toUpperCase()) return res.status(422).json({ ok: false, error: 'Payment currency must match the selected invoice.' });
+    }
+    const receiptNumber = `CDX-R-${new Date().getFullYear()}-${randomInt(100000, 1000000)}`;
+    const payment = {
+      id: randomUUID(),
+      clientId,
+      client_id: clientId,
+      clientName: String(client.name || client.company || ''),
+      clientEmail: String(client.email || ''),
+      invoiceId,
+      invoice_id: invoiceId,
+      invoiceNumber: invoice?.invoice_number || invoice?.invoiceNumber || '',
+      receiptNumber,
+      receipt_number: receiptNumber,
+      paymentDate,
+      payment_date: paymentDate,
+      paymentMethod: String(req.body?.paymentMethod || 'Other'),
+      payment_method: String(req.body?.paymentMethod || 'Other'),
+      transactionReference: String(req.body?.transactionReference || '').trim(),
+      transaction_reference: String(req.body?.transactionReference || '').trim(),
+      description: String(req.body?.description || '').trim(),
+      amount,
+      currency,
+      status: 'Completed',
+      created_at: now,
+      created_by: staff.id,
+    };
+    await getMongoCollection('payments').insertOne(payment);
+    if (invoice) {
+      const amountPaid = Math.round(((Number(invoice.amount_paid ?? invoice.amountPaid) || 0) + amount) * 100) / 100;
+      const total = Number(invoice.total ?? invoice.amount) || 0;
+      const balanceDue = Math.max(0, Math.round((total - amountPaid) * 100) / 100);
+      const invoiceStatus = balanceDue <= 0 ? 'Paid' : 'Partially paid';
+      await getMongoCollection('invoices').updateOne(
+        { id: invoiceId, clientId },
+        { $set: { amountPaid, amount_paid: amountPaid, balanceDue, balance_due: balanceDue, status: invoiceStatus, updated_at: now } },
+      );
+      invoice = { ...invoice, amountPaid, amount_paid: amountPaid, balanceDue, balance_due: balanceDue, status: invoiceStatus };
+    }
+    return res.status(201).json({ ok: true, payment, invoice });
+  }
+
+  return res.status(422).json({ ok: false, error: 'Accounting record type must be invoice or payment.' });
 });
 
 apiRouter.all('/admin/accounting/:clientId/services', (_req: Request, res: Response) => {
@@ -1998,12 +2199,16 @@ apiRouter.post('/admin/hostinger/mailboxes/:resourceId/send-to-client', async (r
   const resourceId = String(req.params.resourceId || '').trim();
   const subject = String(req.body?.subject || '').trim();
   const text = String(req.body?.text || '').trim();
+  const html = String(req.body?.html || '').trim();
   if (!resourceId) return res.status(400).json({ ok: false, error: 'A sender mailbox is required.' });
   if (!subject || subject.length > 200) {
     return res.status(422).json({ ok: false, error: 'Subject must be between 1 and 200 characters.' });
   }
   if (!text || text.length > 20000) {
     return res.status(422).json({ ok: false, error: 'Message must be between 1 and 20000 characters.' });
+  }
+  if (html.length > 50000) {
+    return res.status(422).json({ ok: false, error: 'HTML message cannot exceed 50000 characters.' });
   }
 
   const [snapshot, assignment] = await Promise.all([
@@ -2032,7 +2237,7 @@ apiRouter.post('/admin/hostinger/mailboxes/:resourceId/send-to-client', async (r
         Authorization: `******`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ to: [recipient], subject, text }),
+      body: JSON.stringify({ to: [recipient], subject, text, ...(html ? { html } : {}) }),
       signal: AbortSignal.timeout(20000),
     });
   } catch {
@@ -2843,40 +3048,37 @@ apiRouter.all('/admin/settings', (_req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 apiRouter.post('/portal/login', async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body || {};
+    const { email } = req.body || {};
+    const password = String(req.body?.password || '');
     const normEmail = String(email || '').toLowerCase().trim();
+    if (!normEmail || !password) {
+      return res.status(400).json({ ok: false, error: 'Enter your email address and password.' });
+    }
 
     const clientsCol = getMongoCollection('clients');
+    const escapedEmail = normEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     let client = await clientsCol.findOne({
       $or: [
         { email: normEmail },
-        { email: { $regex: `^${normEmail}$`, $options: 'i' } },
+        { email: { $regex: `^${escapedEmail}$`, $options: 'i' } },
       ],
     });
 
-    if (!client && normEmail === 'client@codexdynamics.com') {
-      client = {
-        id: 'client_apex_1',
-        name: 'Marcus Vance',
-        company: 'Apex Global Logistics',
-        email: 'client@codexdynamics.com',
-        phone: '+44 20 7946 0912',
-        country: 'United Kingdom',
-        countryCode: 'GB',
-        status: 'Active',
-        portalEnabled: true,
-        tier: 'Enterprise Partner',
-        createdAt: new Date().toISOString(),
-      };
-      await clientsCol.insertOne(client);
-    }
-
     if (!client) {
-      return res.status(401).json({ ok: false, error: 'Client account not found in MongoDB.' });
+      return res.status(401).json({ ok: false, error: 'The email or password is incorrect.' });
     }
 
-    if (password && client.password && client.password !== password && password !== 'admin123') {
-      return res.status(401).json({ ok: false, error: 'Invalid portal password.' });
+    if (client.status === 'Suspended' || client.deleted_at || client.is_bin === true) {
+      return res.status(403).json({ ok: false, error: 'This client portal account is unavailable. Contact support.' });
+    }
+    if (client.portalEnabled === false || client.portal_enabled === false || client.portal_enabled === 0) {
+      return res.status(403).json({ ok: false, error: 'Client portal access is disabled. Contact support.' });
+    }
+    if (!client.password) {
+      return res.status(403).json({ ok: false, error: 'A portal password has not been set for this account. Contact your account manager.' });
+    }
+    if (client.password !== password) {
+      return res.status(401).json({ ok: false, error: 'The email or password is incorrect.' });
     }
 
     const token = `cdx_portal_mongo_${client.id}_${Date.now()}`;
@@ -2896,7 +3098,7 @@ apiRouter.post('/portal/login', async (req: Request, res: Response) => {
         country: client.country || 'United Kingdom',
         countryCode: client.countryCode || 'GB',
         status: client.status || 'Active',
-        portalEnabled: client.portalEnabled !== false,
+        portalEnabled: client.portalEnabled !== false && client.portal_enabled !== false && client.portal_enabled !== 0,
         tier: client.tier || 'Enterprise Partner',
         lastLoginAt: new Date().toISOString(),
         createdAt: client.createdAt || new Date().toISOString(),
@@ -2918,6 +3120,91 @@ apiRouter.post('/portal/logout', (_req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
+apiRouter.all('/admin/clients/:clientId/access', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const clientId = String(req.params.clientId || '').trim();
+  const client = await getMongoCollection('clients').findOne({ id: clientId });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  const isSuperAdmin = normalizeAdminRole(staff.role) === 'Super Admin';
+  if (!isSuperAdmin) {
+    const profilePermissions = await getMongoCollection('client_profile_permissions').findOne({ clientId });
+    const accessPermission = String(profilePermissions?.permissions?.access || '');
+    const allowed = req.method === 'GET'
+      ? ['read', 'edit'].includes(accessPermission)
+      : req.method === 'PUT' && accessPermission === 'edit';
+    if (!allowed) return res.status(403).json({ ok: false, error: 'You do not have permission to manage this client access section.' });
+  }
+  const accessCollection = getMongoCollection('client_access');
+
+  if (req.method === 'GET') {
+    const record = await accessCollection.findOne({ clientId });
+    const access = record ? {
+      websiteUrl: String(record.websiteUrl || ''),
+      publicWebsiteUrl: String(record.publicWebsiteUrl || ''),
+      websiteUsername: String(record.websiteUsername || ''),
+      emailAddress: String(record.emailAddress || ''),
+      webmailUrl: String(record.webmailUrl || ''),
+      imapHost: String(record.imapHost || 'imap.hostinger.com'),
+      imapPort: Number(record.imapPort) || 993,
+      smtpHost: String(record.smtpHost || 'smtp.hostinger.com'),
+      smtpPort: Number(record.smtpPort) || 465,
+      hasWebsitePassword: Boolean(record.websitePassword),
+      hasEmailPassword: Boolean(record.emailPassword),
+    } : null;
+    return res.json({ ok: true, access });
+  }
+
+  if (req.method !== 'PUT') return res.status(405).json({ ok: false, error: 'Method not allowed.' });
+  const body = req.body || {};
+  const fields = ['websiteUrl', 'publicWebsiteUrl', 'websiteUsername', 'emailAddress', 'webmailUrl', 'imapHost', 'smtpHost'];
+  const updates: Record<string, any> = {};
+  for (const field of fields) {
+    const value = String(body[field] ?? '').trim();
+    if (value.length > 500) return res.status(422).json({ ok: false, error: `${field} is too long.` });
+    updates[field] = value;
+  }
+  for (const field of ['websiteUrl', 'publicWebsiteUrl', 'webmailUrl']) {
+    if (!updates[field]) continue;
+    try {
+      const url = new URL(updates[field]);
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
+    } catch {
+      return res.status(422).json({ ok: false, error: `${field} must be a valid HTTP or HTTPS URL.` });
+    }
+  }
+  if (updates.emailAddress && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updates.emailAddress)) {
+    return res.status(422).json({ ok: false, error: 'Email address is invalid.' });
+  }
+  for (const field of ['imapPort', 'smtpPort']) {
+    const port = Number(body[field]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return res.status(422).json({ ok: false, error: `${field} must be between 1 and 65535.` });
+    }
+    updates[field] = port;
+  }
+  const existing = await accessCollection.findOne({ clientId });
+  const websitePassword = String(body.websitePassword || '');
+  const emailPassword = String(body.emailPassword || '');
+  if (websitePassword.length > 2048 || emailPassword.length > 2048) {
+    return res.status(422).json({ ok: false, error: 'Passwords cannot exceed 2048 characters.' });
+  }
+  updates.websitePassword = websitePassword
+    ? encryptClientAccessSecret(websitePassword)
+    : existing?.websitePassword || null;
+  updates.emailPassword = emailPassword
+    ? encryptClientAccessSecret(emailPassword)
+    : existing?.emailPassword || null;
+  updates.clientId = clientId;
+  updates.updatedAt = new Date().toISOString();
+  await accessCollection.updateOne(
+    { clientId },
+    { $set: updates, $setOnInsert: { createdAt: updates.updatedAt } },
+    { upsert: true },
+  );
+  return res.json({ ok: true });
+});
+
 apiRouter.get('/portal/data', async (req: Request, res: Response) => {
   const portalClient = await portalTicketClient(req, res);
   if (!portalClient) return;
@@ -2925,7 +3212,7 @@ apiRouter.get('/portal/data', async (req: Request, res: Response) => {
   if (String(req.query.client_id || '') !== clientId) {
     return res.status(403).json({ ok: false, error: 'You do not have permission to load this client data.' });
   }
-  const [client, projects, tickets, notifs, msgs] = await Promise.all([
+  const [client, projects, tickets, notifs, msgs, access] = await Promise.all([
     Promise.resolve(portalClient),
     clientId ? getMongoCollection('client_projects').find({
       $and: [
@@ -2942,25 +3229,33 @@ apiRouter.get('/portal/data', async (req: Request, res: Response) => {
     clientId ? getMongoCollection('client_support_tickets').find({ clientId }) : [],
     getMongoCollection('notifications').find(),
     getMongoCollection('messages').find(),
+    getMongoCollection('client_access').findOne({ clientId }),
   ]);
+  const publicWebsiteUrl = String(access?.publicWebsiteUrl || '');
+  const website = publicWebsiteUrl ? {
+    id: `website_${clientId}`,
+    clientId,
+    name: String(portalClient.company || portalClient.name || 'Website'),
+    domain: (() => {
+      try { return new URL(publicWebsiteUrl).hostname; } catch { return ''; }
+    })(),
+    websiteUrl: publicWebsiteUrl,
+    backOfficeUrl: String(access?.websiteUrl || ''),
+    status: 'Configured',
+    connectionStatus: 'Pending Setup',
+    connectorId: '',
+    accessEnabled: Boolean(access?.websiteUrl),
+    techStack: [],
+    hostingPlan: 'Not specified',
+    sslStatus: publicWebsiteUrl.startsWith('https://') ? 'HTTPS' : 'Not configured',
+    createdAt: String(access?.createdAt || ''),
+    updatedAt: String(access?.updatedAt || ''),
+  } : null;
 
   res.json({
     ok: true,
     client,
-    websites: [
-      {
-        id: 'web_1',
-        clientId,
-        name: 'Apex Global Logistics Platform',
-        domain: 'apexlogistics.io',
-        websiteUrl: 'https://apexlogistics.io',
-        backOfficeUrl: 'https://admin.apexlogistics.io',
-        sslActive: true,
-        status: 'Online',
-        trafficRank: 'Top 5%',
-        uptimePercent: 99.98,
-      },
-    ],
+    websites: website ? [website] : [],
     projects,
     invoices: [
       { id: 'inv_101', clientId, number: 'CDX-2026-042', amount: 4800, status: 'Paid', date: '2026-10-01' },
@@ -2978,6 +3273,28 @@ apiRouter.get('/portal/data', async (req: Request, res: Response) => {
     files: [],
     notifications: notifs,
     messages: msgs,
+  });
+});
+
+apiRouter.get('/portal/access', async (req: Request, res: Response) => {
+  const client = await portalTicketClient(req, res);
+  if (!client) return;
+  const clientId = String(client.id);
+  if (String(req.query.client_id || '') !== clientId) {
+    return res.status(403).json({ ok: false, error: 'You do not have permission to load these access details.' });
+  }
+  const record = await getMongoCollection('client_access').findOne({ clientId });
+  if (!record) return res.json({ ok: true, access: null });
+  return res.json({
+    ok: true,
+    access: {
+      websiteUrl: String(record.websiteUrl || ''),
+      websiteUsername: String(record.websiteUsername || ''),
+      websitePassword: decryptClientAccessSecret(record.websitePassword),
+      emailAddress: String(record.emailAddress || ''),
+      webmailUrl: String(record.webmailUrl || ''),
+      emailPassword: decryptClientAccessSecret(record.emailPassword),
+    },
   });
 });
 

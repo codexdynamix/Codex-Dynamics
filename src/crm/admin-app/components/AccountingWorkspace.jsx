@@ -948,7 +948,7 @@ export default function AccountingWorkspace({ showNotification }) {
         <header className="aw-drawer-header"><div><span className="aw-drawer-kicker">CLIENT LEDGER</span><h2 id="aw-drawer-title">{activeClient.name || activeClient.company || 'Client accounting'}</h2>{activeClient.email && <p>{activeClient.email}</p>}{activeClient.phone && <p>{activeClient.phone}</p>}</div>
           <button ref={closeButtonRef} type="button" className="aw-icon-button aw-close-button" aria-label="Close client ledger" data-testid="button-close-client-ledger" onClick={closeClient}><X size={18} /></button>
         </header>
-        <div className="aw-drawer-content"><ClientAccountingPanel clientId={activeClient.id} clientName={activeClient.name || activeClient.company || 'Client'} initialMode={activeClientMode} showNotification={notify} canEdit onSaved={() => refreshOverview({ silent: true })} /></div>
+        <div className="aw-drawer-content"><ClientAccountingPanel clientId={activeClient.id} clientName={activeClient.name || activeClient.company || 'Client'} clientEmail={activeClient.email || ''} initialMode={activeClientMode} showNotification={notify} canEdit onSaved={() => refreshOverview({ silent: true })} /></div>
       </section>
     </div>}
   </section>;

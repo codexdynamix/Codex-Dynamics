@@ -17,7 +17,7 @@ import {
   KeyRound,
   Mail,
 } from 'lucide-react';
-import { readPortalSession, clearPortalSession, setPortalSession } from '../services/portalAuth';
+import { readPortalSession, clearPortalSession } from '../services/portalAuth';
 import { portalDb, type PortalClient } from '../services/portalDatabase';
 import { ThemeToggle } from '../components/ThemeToggle';
 
@@ -34,7 +34,6 @@ export function PortalShell({ currentPath, onNavigate, children }: PortalShellPr
   const [notificationError, setNotificationError] = useState('');
   const [client, setClient] = useState<PortalClient | null>(session?.client || null);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [allClients, setAllClients] = useState<PortalClient[]>([]);
 
   useEffect(() => {
     const updateState = () => {
@@ -46,7 +45,6 @@ export function PortalShell({ currentPath, onNavigate, children }: PortalShellPr
       setClient(sess.client);
       const notifs = portalDb.getNotifications(sess.client.id);
       setUnreadCount(notifs.filter((n) => !n.read).length);
-      setAllClients(portalDb.adminGetAllClients());
     };
 
     updateState();
@@ -88,15 +86,6 @@ export function PortalShell({ currentPath, onNavigate, children }: PortalShellPr
   const handleLogout = () => {
     clearPortalSession();
     onNavigate('/portal/login');
-  };
-
-  const handleSwitchClient = (newClientId: string) => {
-    const target = portalDb.getClientById(newClientId);
-    if (target && target.portalEnabled) {
-      setPortalSession(target);
-      setClient(target);
-      onNavigate('/portal/dashboard');
-    }
   };
 
   const notifications = portalDb.getNotifications(client.id);
@@ -324,21 +313,6 @@ export function PortalShell({ currentPath, onNavigate, children }: PortalShellPr
                 {client.name}
               </div>
 
-              {/* Demo Switcher */}
-              <div className="mt-2.5 pt-2.5 border-t border-black/[0.05] dark:border-white/[0.07] flex items-center justify-between gap-2">
-                <span className="text-[10px] text-[#86868B] font-medium shrink-0">Switch:</span>
-                <select
-                  value={client.id}
-                  onChange={(e) => handleSwitchClient(e.target.value)}
-                  className="bg-black/[0.03] dark:bg-white/[0.06] hover:bg-black/[0.05] dark:hover:bg-white/[0.1] border border-black/[0.08] dark:border-white/[0.1] rounded-lg px-2 py-0.5 text-[10px] text-[#1D1D1F] dark:text-white font-medium focus:outline-none transition-colors cursor-pointer max-w-[125px] truncate"
-                >
-                  {allClients.map((c) => (
-                    <option key={c.id} value={c.id} className="bg-white dark:bg-[#1C1C1E] text-[#1D1D1F] dark:text-white">
-                      {c.company.split(' ')[0]} ({c.name.split(' ')[0]})
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
           </div>
 

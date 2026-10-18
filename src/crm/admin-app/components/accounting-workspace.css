@@ -435,3 +435,77 @@
   .crm-admin-app .accounting-workspace *, .crm-admin-app .accounting-workspace *::before, .crm-admin-app .accounting-workspace *::after { animation-duration: .01ms; animation-iteration-count: 1; scroll-behavior: auto; transition-duration: .01ms; }
 }
 }
+.crm-admin-app .aw-document-sheet .aw-document-lines td { color: #303a47; }
+.crm-admin-app .aw-document-sheet .aw-document-lines th { color: #566273; }
+@layer crm-documents {
+  .crm-admin-app .aw-document-backdrop { position: fixed; z-index: 1300; inset: 0; display: grid; place-items: center; overflow: auto; padding: 20px; background: rgba(9, 13, 19, .78); backdrop-filter: blur(5px); }
+  .crm-admin-app .aw-document-dialog { width: min(940px, 100%); max-height: min(94vh, 1020px); display: flex; flex-direction: column; overflow: auto; border: 1px solid var(--crm-border, rgba(255,255,255,.14)); border-radius: 12px; background: var(--crm-bg, #1c1c1e); color: var(--crm-text-primary, #f5f5f7); box-shadow: 0 24px 80px rgba(0,0,0,.48); }
+  .crm-admin-app .aw-document-toolbar { position: sticky; z-index: 1; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--crm-border, rgba(255,255,255,.14)); background: var(--crm-card, #242426); }
+  .crm-admin-app .aw-document-toolbar > div:first-child { min-width: 0; }
+  .crm-admin-app .aw-document-toolbar > div:first-child > span, .crm-admin-app .aw-document-kicker { color: var(--crm-text-secondary, #b0b0b5); font-size: 9px; font-weight: 700; letter-spacing: .13em; }
+  .crm-admin-app .aw-document-toolbar h2 { overflow: hidden; margin: 4px 0 0; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+  .crm-admin-app .aw-document-toolbar-actions { display: flex; align-items: center; gap: 7px; }
+  .crm-admin-app .aw-document-toolbar .aw-icon-button { width: 30px; height: 30px; }
+  .crm-admin-app .aw-document-sheet { box-sizing: border-box; width: min(760px, calc(100% - 38px)); margin: 22px auto; padding: 42px 48px 30px; background: #fff; color: #20252d; box-shadow: 0 5px 26px rgba(0,0,0,.2); font-family: Arial, Helvetica, sans-serif; }
+  .crm-admin-app .aw-document-brand { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 22px; border-bottom: 2px solid #1f354d; }
+  .crm-admin-app .aw-document-brand strong { color: #1f354d; font-size: 13px; letter-spacing: .13em; }
+  .crm-admin-app .aw-document-brand span { color: #727b88; font-size: 10px; }
+  .crm-admin-app .aw-document-title-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 28px 0 20px; }
+  .crm-admin-app .aw-document-title-row h1 { margin: 5px 0 0; color: #182537; font-size: 31px; letter-spacing: -.04em; }
+  .crm-admin-app .aw-document-kicker { color: #6c7786; font-size: 9px; }
+  .crm-admin-app .aw-document-status { padding: 6px 10px; border: 1px solid #d2e5db; border-radius: 99px; background: #eff8f2; color: #28734a; font-size: 10px; font-weight: 700; }
+  .crm-admin-app .aw-document-status.draft { border-color: #e8dfc7; background: #fbf7eb; color: #846728; }
+  .crm-admin-app .aw-document-status.overdue, .crm-admin-app .aw-document-status.voided { border-color: #ecd0ca; background: #fff2ef; color: #a34637; }
+  .crm-admin-app .aw-document-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 13px 15px; border: 1px solid #e5e8ec; border-radius: 7px; background: #f7f8fa; }
+  .crm-admin-app .aw-document-meta > div, .crm-admin-app .aw-document-parties section { display: grid; gap: 5px; min-width: 0; }
+  .crm-admin-app .aw-document-meta span, .crm-admin-app .aw-document-parties section > span, .crm-admin-app .aw-document-note > span { color: #7b8491; font-size: 9px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+  .crm-admin-app .aw-document-meta strong { overflow-wrap: anywhere; color: #29384a; font-size: 11px; }
+  .crm-admin-app .aw-document-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 25px 0; }
+  .crm-admin-app .aw-document-parties strong { color: #202c3a; font-size: 12px; }
+  .crm-admin-app .aw-document-parties small { color: #707988; font-size: 10px; }
+  .crm-admin-app .aw-document-lines { width: 100%; border-collapse: collapse; color: #303a47; font-size: 10px; }
+  .crm-admin-app .aw-document-lines th { padding: 10px 9px; border-bottom: 1px solid #cdd4dc; background: #f3f5f7; color: #566273; font-size: 9px; font-weight: 700; text-align: left; text-transform: uppercase; }
+  .crm-admin-app .aw-document-lines td { padding: 12px 9px; border-bottom: 1px solid #e6e9ed; vertical-align: top; }
+  .crm-admin-app .aw-document-lines td small { display: block; margin-top: 4px; color: #7b8491; font-size: 9px; }
+  .crm-admin-app .aw-document-bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, .75fr); gap: 28px; margin-top: 23px; }
+  .crm-admin-app .aw-document-note p { margin: 8px 0 0; color: #606b79; font-size: 10px; line-height: 1.6; }
+  .crm-admin-app .aw-document-totals > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; color: #687280; font-size: 10px; }
+  .crm-admin-app .aw-document-totals strong { color: #273445; font-size: 10px; }
+  .crm-admin-app .aw-document-totals .aw-document-grand-total { margin: 5px 0; padding: 12px 0; border-top: 1px solid #d8dde3; border-bottom: 1px solid #d8dde3; color: #26384e; font-size: 12px; font-weight: 700; }
+  .crm-admin-app .aw-document-totals .aw-document-grand-total strong { color: #1e334b; font-size: 16px; }
+  .crm-admin-app .aw-document-footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 34px; padding-top: 12px; border-top: 1px solid #e1e5e9; color: #697483; font-size: 9px; }
+  .crm-admin-app .aw-document-email { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, .6fr) auto; align-items: center; gap: 10px 14px; padding: 13px 16px; border-top: 1px solid var(--crm-border, rgba(255,255,255,.14)); background: var(--crm-card, #242426); }
+  .crm-admin-app .aw-document-email > div:first-child { display: grid; gap: 4px; min-width: 0; }
+  .crm-admin-app .aw-document-email > div:first-child strong { font-size: 11px; }
+  .crm-admin-app .aw-document-email > div:first-child span { overflow: hidden; color: var(--crm-text-secondary, #b0b0b5); font-size: 10px; text-overflow: ellipsis; }
+  .crm-admin-app .aw-document-email label { display: grid; gap: 4px; color: var(--crm-text-secondary, #b0b0b5); font-size: 9px; }
+  .crm-admin-app .aw-document-email select { box-sizing: border-box; width: 100%; min-width: 0; height: 31px; padding: 4px 7px; border: 1px solid var(--crm-border, rgba(255,255,255,.14)); border-radius: 5px; background: var(--crm-bg, #1c1c1e); color: var(--crm-text-primary, #f5f5f7); font-size: 10px; }
+  .crm-admin-app .aw-document-email .aw-button { min-height: 34px; }
+  .crm-admin-app .aw-document-email-error, .crm-admin-app .aw-document-email-success, .crm-admin-app .aw-document-email-hint { grid-column: 1 / -1; margin: 0; font-size: 10px; }
+  .crm-admin-app .aw-document-email-error { color: #e5a296; }
+  .crm-admin-app .aw-document-email-success { color: #91d5ad; }
+  .crm-admin-app .aw-document-email-hint { color: var(--crm-text-secondary, #b0b0b5); }
+  @media (max-width: 640px) {
+    .crm-admin-app .aw-document-backdrop { align-items: start; padding: 6px; }
+    .crm-admin-app .aw-document-dialog { max-height: calc(100vh - 12px); }
+    .crm-admin-app .aw-document-toolbar { align-items: flex-start; flex-direction: column; }
+    .crm-admin-app .aw-document-toolbar-actions { width: 100%; flex-wrap: wrap; }
+    .crm-admin-app .aw-document-sheet { width: calc(100% - 20px); margin: 10px auto; padding: 25px 20px; }
+    .crm-admin-app .aw-document-brand span { text-align: right; }
+    .crm-admin-app .aw-document-meta { grid-template-columns: 1fr 1fr; }
+    .crm-admin-app .aw-document-parties { gap: 14px; }
+    .crm-admin-app .aw-document-bottom { grid-template-columns: 1fr; gap: 18px; }
+    .crm-admin-app .aw-document-email { grid-template-columns: 1fr; }
+    .crm-admin-app .aw-document-email-error, .crm-admin-app .aw-document-email-success, .crm-admin-app .aw-document-email-hint { grid-column: auto; }
+    .crm-admin-app .aw-document-email .aw-button { justify-self: start; }
+  }
+  @media print {
+    body * { visibility: hidden !important; }
+    .crm-admin-app .aw-document-backdrop, .crm-admin-app .aw-document-backdrop * { visibility: visible !important; }
+    .crm-admin-app .aw-document-backdrop { position: absolute !important; inset: 0 !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; backdrop-filter: none !important; }
+    .crm-admin-app .aw-document-dialog { width: 100% !important; max-height: none !important; overflow: visible !important; border: 0 !important; border-radius: 0 !important; background: #fff !important; box-shadow: none !important; }
+    .crm-admin-app .aw-document-toolbar, .crm-admin-app .aw-document-email { display: none !important; }
+    .crm-admin-app .aw-document-sheet { width: 100% !important; margin: 0 !important; padding: 16mm !important; box-shadow: none !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    @page { size: A4; margin: 0; }
+  }
+}

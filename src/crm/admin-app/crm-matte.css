@@ -1371,3 +1371,19 @@ body > .crm-profile-overlay .crm-admin-profile-modal {
     min-height: 160px !important;
   }
 }
+
+.crm-admin-app.crm-admin-app .crm-super-admin-container .crm-staff-workspace > .crm-staff-workspace-tabs {
+  margin-bottom: 4px;
+}
+
+.crm-admin-app.crm-admin-app .crm-super-admin-container .crm-staff-workspace .crm-staff-directory-content {
+  padding: 0;
+}
+
+.crm-admin-app.crm-admin-app .crm-super-admin-container .crm-staff-workspace .crm-staff-directory-content .crm-inline-b75fad0009 {
+  margin-bottom: 8px;
+}
+
+.crm-admin-app.crm-admin-app .crm-super-admin-container .crm-staff-workspace .crm-staff-directory-content .crm-super-admin-card {
+  padding: 14px !important;
+}

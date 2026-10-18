@@ -10,6 +10,7 @@ import {
   updateClientRecurringService,
 } from '../adminApi.js';
 import InvoiceFollowupForm from './InvoiceFollowupForm.jsx';
+import AccountingDocument from './AccountingDocument.jsx';
 
 const today = () => {
   const date = new Date();
@@ -124,7 +125,7 @@ function dateInput(value, fallback) {
   return Number.isNaN(date.getTime()) ? fallback : date.toISOString().slice(0, 10);
 }
 
-export default function ClientAccountingPanel({ clientId, clientName = '', showNotification, canEdit = true, onSaved, initialMode = '' }) {
+export default function ClientAccountingPanel({ clientId, clientName = '', clientEmail = '', showNotification, canEdit = true, onSaved, initialMode = '' }) {
   const [records, setRecords] = useState({ invoices: [], payments: [], recurringServices: [], hosting: [], domains: [], followups: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -146,6 +147,7 @@ export default function ClientAccountingPanel({ clientId, clientName = '', showN
   const [voidingPayment, setVoidingPayment] = useState(null);
   const [voidReason, setVoidReason] = useState('');
   const [followupInvoice, setFollowupInvoice] = useState(null);
+  const [activeDocument, setActiveDocument] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -204,7 +206,8 @@ export default function ClientAccountingPanel({ clientId, clientName = '', showN
     setBusy(true);
     setError('');
     try {
-      await saveClientAccountingRecord(clientId, { type: 'invoice', currency, issueDate, dueDate, taxRate, status: invoiceStatus, lineItems: items });
+      const result = await saveClientAccountingRecord(clientId, { type: 'invoice', currency, issueDate, dueDate, taxRate, status: invoiceStatus, lineItems: items });
+      setActiveDocument({ kind: 'invoice', document: normalizeInvoice(result.invoice), invoice: normalizeInvoice(result.invoice) });
       setItems([newLine()]);
       setTaxRate(0);
       setMode('');
@@ -223,7 +226,8 @@ export default function ClientAccountingPanel({ clientId, clientName = '', showN
     setBusy(true);
     setError('');
     try {
-      await saveClientAccountingRecord(clientId, { type: 'payment', ...payment, currency: selectedInvoice?.currency || currency, amount: Number(payment.amount) });
+      const result = await saveClientAccountingRecord(clientId, { type: 'payment', ...payment, currency: selectedInvoice?.currency || currency, amount: Number(payment.amount) });
+      setActiveDocument({ kind: 'receipt', document: normalizePayment(result.payment), invoice: selectedInvoice || null });
       setPayment({ invoiceId: '', paymentDate: today(), amount: '', paymentMethod: 'Bank transfer', transactionReference: '', description: '' });
       setMode('');
       await load();
@@ -596,11 +600,12 @@ export default function ClientAccountingPanel({ clientId, clientName = '', showN
         {loading ? <p className="crm-inline-f6c04024cd">Loading…</p> : records.invoices.length === 0 ? <p className="crm-inline-f6c04024cd">No invoices yet. Create one to start tracking services, amounts, and due dates.</p> : (
           <div className="aw-ledger-detail-scroll" role="region" tabIndex="0" aria-label="Client invoice records. Scroll horizontally to review all columns.">
           <table className="aw-ledger-detail-table crm-inline-bc0dba4e98" >
-            <thead><tr>{['Invoice', 'Services', 'Issued', 'Due', 'Total', 'Paid', 'Balance', 'Status', ...(canEdit ? ['Follow-up'] : [])].map((heading) => <th key={heading} className="crm-inline-4c2fa14780">{heading}</th>)}</tr></thead>
+            <thead><tr>{['Invoice', 'Services', 'Issued', 'Due', 'Total', 'Paid', 'Balance', 'Status', 'Document', ...(canEdit ? ['Follow-up'] : [])].map((heading) => <th key={heading} className="crm-inline-4c2fa14780">{heading}</th>)}</tr></thead>
             <tbody>{records.invoices.map((invoice) => (
               <tr key={invoice.id} className="crm-inline-29c888978e">
                 <td className="crm-inline-a3dd7fd085">{invoice.invoiceNumber}</td><td className="crm-inline-a3dd7fd085">{invoice.lineItems.map((item) => item.service || item.description).join(', ') || 'Agency services'}</td>
                 <td className="crm-inline-a3dd7fd085">{invoice.issueDate}</td><td className="crm-inline-a3dd7fd085">{invoice.dueDate}</td><td className="crm-inline-a3dd7fd085">{money(invoice.total, invoice.currency)}</td><td className="crm-inline-a3dd7fd085">{money(invoice.amountPaid, invoice.currency)}</td><td className="crm-inline-a3dd7fd085">{money(invoice.balanceDue, invoice.currency)}</td><td className="crm-inline-a3dd7fd085">{invoice.status}</td>
+                <td className="crm-inline-a3dd7fd085"><button type="button" className="aw-row-action" onClick={() => setActiveDocument({ kind: 'invoice', document: invoice, invoice })} data-testid={`button-view-invoice-${invoice.id}`}>View / email</button></td>
                 {canEdit && <td className="crm-inline-a3dd7fd085">{invoice.balanceDue > 0 && String(invoice.status || '').toLowerCase() !== 'draft'
                   ? <button type="button" className="aw-row-action" onClick={() => setFollowupInvoice(invoice)} data-testid={`button-log-invoice-followup-${invoice.id}`}>Log follow-up</button>
                   : <span className="crm-inline-ab7671bd0d">—</span>}</td>}
@@ -628,7 +633,7 @@ export default function ClientAccountingPanel({ clientId, clientName = '', showN
         {!loading && records.payments.length === 0 ? <p className="crm-inline-f6c04024cd">No payments recorded yet.</p> : (
           <div className="aw-ledger-detail-scroll" role="region" tabIndex="0" aria-label="Client payment receipts. Scroll horizontally to review all columns.">
           <table className="aw-ledger-receipt-table crm-inline-bc0dba4e98" >
-            <thead><tr>{['Receipt', 'Date', 'Linked invoice', 'Method', 'Reference', 'Amount', 'Status', ...(canEdit ? ['Action'] : [])].map((heading) => <th key={heading} className="crm-inline-4c2fa14780">{heading}</th>)}</tr></thead>
+            <thead><tr>{['Receipt', 'Date', 'Linked invoice', 'Method', 'Reference', 'Amount', 'Status', 'Document', ...(canEdit ? ['Action'] : [])].map((heading) => <th key={heading} className="crm-inline-4c2fa14780">{heading}</th>)}</tr></thead>
             <tbody>{records.payments.map((row) => {
               const invoice = records.invoices.find((candidate) => candidate.id === row.invoiceId);
               const isVoided = String(row.status || '').toLowerCase() === 'voided';
@@ -640,6 +645,7 @@ export default function ClientAccountingPanel({ clientId, clientName = '', showN
                   {isVoided && row.void_reason && <small className="crm-inline-119cdf39ab" title={row.void_reason}>Reason: {row.void_reason}</small>}
                   {isVoided && (row.voided_by || row.voided_at) && <small className="crm-inline-57f1addd15">Audit: {row.voided_by || 'Admin'} · {row.voided_at || 'Date unavailable'}</small>}
                 </td>
+                <td className="crm-inline-a3dd7fd085"><button type="button" className="aw-row-action" onClick={() => setActiveDocument({ kind: 'receipt', document: row, invoice: invoice || null })} data-testid={`button-view-receipt-${row.id}`}>View / email</button></td>
                 {canEdit && <td className="crm-inline-a3dd7fd085">{!isVoided && ['completed', 'received', 'paid', 'partially paid'].includes(String(row.status || '').toLowerCase())
                   ? <button type="button" className="aw-row-action aw-item-remove" disabled={busy} onClick={() => { setVoidingPayment(row); setVoidReason(''); }} data-testid={`button-void-payment-${row.id}`}>Void</button>
                   : isVoided ? <span className="crm-inline-8a31515267">Voided</span> : '—'}</td>}
@@ -799,6 +805,15 @@ export default function ClientAccountingPanel({ clientId, clientName = '', showN
           <button type="button" className="aw-button aw-button-quiet" disabled={busy} onClick={() => setAssetEditing(null)}>Cancel</button>
         </form>
       )}
+      {activeDocument && <AccountingDocument
+        kind={activeDocument.kind}
+        document={activeDocument.document}
+        invoice={activeDocument.invoice}
+        clientId={clientId}
+        clientName={clientName}
+        clientEmail={clientEmail}
+        onClose={() => setActiveDocument(null)}
+      />}
     </div>
   );
 }
