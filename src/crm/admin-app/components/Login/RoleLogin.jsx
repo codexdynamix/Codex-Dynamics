@@ -333,16 +333,7 @@ const RoleLogin = ({ role, onAdminLogin }) => {
               </button>
             </form>
           )}
-
-          <p className="crm-inline-7a55846ad7" hidden={recoveryMode}>
-            Sign in with the email address and password assigned to your staff account.
-          </p>
         </div>
-
-        {/* Security Disclaimers (Apple Footnote) */}
-        <p className="crm-inline-0f1895aa61">
-          Protected with hardware-grade JWT encryption & enterprise governance
-        </p>
 
       </div>
     </div>
