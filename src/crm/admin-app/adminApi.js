@@ -343,7 +343,10 @@ export async function archiveAdminClientProject(projectId) {
 export async function getAdminClientIdentityReviews(status = 'pending') {
   const query = new URLSearchParams({ status: String(status || 'pending') });
   const data = await adminFetch(`/api/admin/client-identity-reviews?${query.toString()}`);
-  return Array.isArray(data?.reviews) ? data.reviews : [];
+  return {
+    reviews: Array.isArray(data?.reviews) ? data.reviews : [],
+    clientsScanned: Number.isFinite(Number(data?.clients_scanned)) ? Number(data.clients_scanned) : null,
+  };
 }
 
 export async function resolveAdminClientIdentityReview(review, decision, primaryClientId = null) {
@@ -760,6 +763,16 @@ export async function getClientNotificationsAsAdmin(userId) {
       readAt:    row.read_at || null,
       timestamp: row.created_at,
     }));
+    const statusHistory = (Array.isArray(l.status_history) && l.status_history.length
+      ? l.status_history
+      : (l.statusHistory || l.status_history || [])).map((s) => ({
+      id:     s.id,
+      from:   s.from_stage || s.from,
+      to:     s.to_stage || s.to,
+      by:     s.by_admin_id || s.by,
+      byName: s.by_name || s.byName,
+      at:     s.created_at || s.at || s.timestamp,
+    })).sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());
   } catch (_) {
     return [];
   }
@@ -1086,15 +1099,29 @@ function mapClientRow(l) {
   };
   const first = l.first_name || '';
   const last  = l.last_name  || '';
-  const commentHistory = (l.comment_history || []).map((c) => ({
+  const storedComments = Array.isArray(l.comment_history) && l.comment_history.length
+    ? l.comment_history
+    : (l.commentHistory || l.comment_history || []);
+  const commentHistory = storedComments.map((c) => ({
     id:   c.id,
     text: c.text,
-    by:   c.by_name,
-    byId: c.by_admin_id,
-    date: (c.created_at || '').slice(0, 10),
-    createdAt: c.created_at,
-  }));
-  const lastComment = commentHistory[commentHistory.length - 1];
+    by:   c.by_name || c.by,
+    byId: c.by_admin_id || c.byId,
+    date: (c.created_at || c.createdAt || c.date || '').slice(0, 10),
+    createdAt: c.created_at || c.createdAt || c.date || '',
+  })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const lastComment = commentHistory[0];
+  const storedStatusHistory = Array.isArray(l.status_history) && l.status_history.length
+    ? l.status_history
+    : (l.statusHistory || l.status_history || []);
+  const statusHistory = storedStatusHistory.map((s) => ({
+    id:     s.id,
+    from:   s.from_stage || s.from,
+    to:     s.to_stage || s.to,
+    by:     s.by_admin_id || s.by,
+    byName: s.by_name || s.byName,
+    at:     s.created_at || s.at || s.timestamp,
+  })).sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());
   return {
     id:                 l.id,
     firstName:          first,
@@ -1140,14 +1167,7 @@ function mapClientRow(l) {
     enquiryId:          l.enquiry_id || l.enquiryId || null,
     // Status + comment timelines, newest first.
     commentHistory,
-    statusHistory:      (l.status_history || []).map((s) => ({
-      id:     s.id,
-      from:   s.from_stage,
-      to:     s.to_stage,
-      by:     s.by_admin_id,
-      byName: s.by_name,
-      at:     s.created_at,
-    })),
+    statusHistory,
     appointments:       Array.isArray(l.appointments) ? l.appointments : [],
   };
 }
@@ -1317,6 +1337,11 @@ export async function resetClientstatusApi(clientId) {
 
 export async function clearClientCommentsApi(clientId) {
   const res = await adminFetch(`/api/admin/clients/${clientId}/comments`, { method: 'DELETE' });
+  return mapClientRow(res.client);
+}
+
+export async function clearClientStatusHistoryApi(clientId) {
+  const res = await adminFetch(`/api/admin/clients/${clientId}/status-history`, { method: 'DELETE' });
   return mapClientRow(res.client);
 }
 
@@ -1678,71 +1703,14 @@ export async function cleanupBinApi(olderThanDays = 30) {
 // ── Live Sessions & Presence ─────────────────────────────────────────────────
 
 export async function getAdminStatus(_token) {
-  return {
-    online_total: 4,
-    online_staff: 4,
-    online_clients: 0,
-    visitor_today: 18,
-    db_ms: 4,
-  };
+  return adminFetch('/api/admin/status');
 }
 
 export async function listSessions(_token, params = {}) {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const rows = [
-    {
-      id: 'sess_sa',
-      user_type: 'admin',
-      admin_id: 'adm_sa',
-      display_name: 'Sarah Admin',
-      display_email: 'superadmin@codexdynamics.com',
-      role: 'Super Admin',
-      is_online: true,
-      country_code: 'GB',
-      country: 'United Kingdom',
-      city: 'London',
-      ip: '127.0.0.1',
-      logged_in_at: nowSec - 1800,
-      last_seen_at: nowSec - 5,
-      logged_out_at: null,
-      current_page: '/admin/super-admin/adm_sa',
-    },
-    {
-      id: 'sess_om',
-      user_type: 'admin',
-      admin_id: 'adm_om',
-      display_name: 'Olivia Manager',
-      display_email: 'manager@codexdynamics.com',
-      role: 'Office Manager',
-      is_online: true,
-      country_code: 'GB',
-      country: 'United Kingdom',
-      city: 'London',
-      ip: '127.0.0.1',
-      logged_in_at: nowSec - 3600,
-      last_seen_at: nowSec - 15,
-      logged_out_at: null,
-      current_page: '/admin/office-manager/adm_om',
-    },
-  ];
-  const filtered = params.type === 'client' ? [] : rows;
-  return { sessions: filtered, total: filtered.length, total_pages: 1 };
-}
-
-export async function listVisitors(_token, _params = {}) {
-  return { visitors: [], total: 0, total_pages: 1 };
-}
-
-export async function getTrackedSessions(_token) {
-  return { tracked: [] };
-}
-
-export async function trackSession(_token, _userType, _userId) {
-  return { ok: true };
-}
-
-export async function untrackSession(_token, _trackId) {
-  return { ok: true };
+  const query = new URLSearchParams();
+  if (params.type) query.set('type', params.type);
+  const suffix = query.size ? `?${query.toString()}` : '';
+  return adminFetch(`/api/admin/sessions${suffix}`);
 }
 
 export async function sendHeartbeat(_token, _page) {
@@ -1754,43 +1722,17 @@ export async function sendHeartbeat(_token, _page) {
 }
 
 export async function getSessionDetail(_token, id) {
-  const nowSec = Math.floor(Date.now() / 1000);
-  return {
-    session: {
-      id,
-      user_type: 'admin',
-      admin_id: 'adm_sa',
-      display_name: 'Sarah Admin',
-      display_email: 'superadmin@codexdynamics.com',
-      role: 'Super Admin',
-      is_online: true,
-      ip: '127.0.0.1',
-      city: 'London',
-      country: 'United Kingdom',
-      country_code: 'GB',
-      logged_in_at: nowSec - 1800,
-      last_seen_at: nowSec - 5,
-      current_page: '/admin',
-    },
-    stats: { total_sessions: 1, avg_duration_sec: 1800, total_time_sec: 1800, first_seen: nowSec - 1800 },
-    top_pages: [],
-    page_visits: [],
-    all_sessions: [],
-  };
+  return adminFetch(`/api/admin/sessions/${encodeURIComponent(id)}`);
 }
 
-export async function deleteSession(_token, _id) {
-  return { ok: true };
+export async function deleteSession(_token, id) {
+  return adminFetch(`/api/admin/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-export async function bulkDeleteSessions(_token, _ids) {
-  return { ok: true };
+export async function bulkDeleteSessions(_token, ids) {
+  return adminFetch('/api/admin/sessions', { method: 'DELETE', body: { ids } });
 }
 
-export async function forceLogoutSession(_token, _id) {
-  return { ok: true };
-}
-
-export async function trackVisitorHit(_path, _referrer) {
-  return { ok: true };
+export async function forceLogoutSession(_token, id) {
+  return adminFetch(`/api/admin/sessions/${encodeURIComponent(id)}/logout`, { method: 'POST' });
 }

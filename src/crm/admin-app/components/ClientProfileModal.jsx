@@ -11,6 +11,7 @@ import {
   getClientPortalPasswordAdmin,
   updateClientApi,
   resetClientstatusApi,
+  clearClientStatusHistoryApi,
   clearClientCommentsApi,
   clearProfileHistoryApi,
   deleteProfileHistoryEntryApi,
@@ -483,41 +484,32 @@ export default function ClientProfileModal({
       });
     }
 
-    if (setData) {
-      setData((prev) => ({
-        ...prev,
-        clients: (prev.clients || []).map((l) =>
-          l.id === client.id
-            ? {
-                ...l,
-                stage: profileStage,
-                status: profileStage,
-                notes: profileNotes,
-                commentHistory: optimisticHistory,
-                assignedToOffice: reassignOfficeId || null,
-                assignedToTeam: reassignTeamId || null,
-                assignedToTeamLeader: reassignTeamLeaderId || null,
-                assignedToAgent: reassignAgentId || null,
-              }
-            : l
-        ),
-      }));
+    let savedClient = null;
+    if (client.id && Object.keys(apiUpdates).length > 0) {
+      try {
+        savedClient = await updateClientApi(client.id, apiUpdates);
+      } catch (err) {
+        console.error('[ClientProfileModal] saveProfile failed', err);
+        showNotification(err?.message || 'Could not save stage/comment to the server.');
+        return;
+      }
     }
 
-    if (client.id && Object.keys(apiUpdates).length > 0) {
-      updateClientApi(client.id, apiUpdates)
-        .then((serverClient) => {
-          if (serverClient && setData) {
-            setData((prev) => ({
-              ...prev,
-              clients: (prev.clients || []).map((l) => (l.id === serverClient.id ? { ...l, ...serverClient } : l)),
-            }));
-          }
-        })
-        .catch((err) => {
-          console.error('[ClientProfileModal] saveProfile failed', err);
-          showNotification('Could not save stage/comment to the server.');
-        });
+    if (setData) {
+      const updatedClient = {
+        ...client,
+        ...(savedClient || {}),
+        stage: profileStage,
+        status: profileStage,
+        notes: profileNotes,
+        commentHistory: optimisticHistory,
+      };
+      setData((prev) => ({
+        ...prev,
+        clients: (prev.clients || []).map((item) =>
+          item.id === client.id ? { ...item, ...updatedClient } : item
+        ),
+      }));
     }
 
     showNotification(`${client.firstName || client.name || 'Client'} updated.`);
@@ -589,6 +581,30 @@ export default function ClientProfileModal({
     } catch (err) {
       console.error('[ClientProfileModal] clearClientComments failed', err);
       showNotification('Could not delete comments - please try again.');
+    }
+  };
+
+  const clearClientStatusHistory = async () => {
+    if (!client) return;
+    const ok = await confirm({
+      title: 'Clear Status Workflow?',
+      message: `Permanently clear the status history for "${client.firstName || client.name}" without changing its current status? This cannot be undone.`,
+      confirmLabel: 'Clear Workflow',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      const updated = await clearClientStatusHistoryApi(client.id);
+      if (setData) {
+        setData((prev) => ({
+          ...prev,
+          clients: (prev.clients || []).map((item) => item.id === updated.id ? { ...item, ...updated } : item),
+        }));
+      }
+      showNotification(`Status workflow cleared for ${client.firstName || client.name}.`);
+    } catch (err) {
+      console.error('[ClientProfileModal] clearClientStatusHistory failed', err);
+      showNotification('Could not clear status workflow - please try again.');
     }
   };
 
@@ -1489,7 +1505,7 @@ export default function ClientProfileModal({
               >
                 Comment History
               </div>
-              {[...client.commentHistory].reverse().map((entry, i) => (
+              {[...client.commentHistory].map((entry, i) => (
                 <div
                   key={i}
                   className="crm-inline-4456df10b5"
@@ -1657,22 +1673,31 @@ export default function ClientProfileModal({
               </button>
             </div>
             <div className="crm-inline-f36152c67e">
-              <button
-                className="crm-button crm-button-secondary crm-super-admin-btn crm-super-admin-btn-small crm-inline-a6cfd0a49f"
-
-                onClick={resetClientstatus}
-                title="Reset stage to New and erase all status history"
-              >
-                🔄 Reset Status
-              </button>
-              <button
-                className="crm-button crm-button-secondary crm-super-admin-btn crm-super-admin-btn-small crm-inline-b9279831c8"
-
-                onClick={clearClientComments}
-                title="Permanently delete all comments on this client"
-              >
-                🗨 Clear Comments
-              </button>
+              {isSuperAdmin && (
+                <>
+                  <button
+                    className="crm-button crm-button-secondary crm-super-admin-btn crm-super-admin-btn-small crm-inline-a6cfd0a49f"
+                    onClick={resetClientstatus}
+                    title="Reset stage to New and erase all status history"
+                  >
+                    🔄 Reset Status
+                  </button>
+                  <button
+                    className="crm-button crm-button-secondary crm-super-admin-btn crm-super-admin-btn-small"
+                    onClick={clearClientStatusHistory}
+                    title="Clear workflow history without changing the current status"
+                  >
+                    Clear Workflow
+                  </button>
+                  <button
+                    className="crm-button crm-button-secondary crm-super-admin-btn crm-super-admin-btn-small crm-inline-b9279831c8"
+                    onClick={clearClientComments}
+                    title="Permanently delete all comments on this client"
+                  >
+                    🗨 Clear Comments
+                  </button>
+                </>
+              )}
               <button
                 className="crm-button crm-button-danger crm-super-admin-btn crm-super-admin-btn-small crm-inline-fd8ae4de3b"
 

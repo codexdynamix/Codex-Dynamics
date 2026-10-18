@@ -37,9 +37,20 @@ async function crmAction(action, payload = {}) {
   if (action === 'save_webhook') return saveAdminWebhookSettings(payload.url);
   if (action === 'test_webhook') return testAdminWebhookSettings();
   if (action === 'change_password') return changeCurrentAdminPassword(payload.currentPassword, payload.newPassword);
-  const blogActions = { save_blog: 'create', update_blog: 'update', delete_blog: 'delete' };
-  if (blogActions[action]) {
-    return runAdminSiteContentAction(blogActions[action], payload, 'blog');
+  const siteContentActions = {
+    save_blog: ['create', 'blog'],
+    update_blog: ['update', 'blog'],
+    delete_blog: ['delete', 'blog'],
+    save_review: ['create', 'review'],
+    update_review: ['update', 'review'],
+    delete_review: ['delete', 'review'],
+    save_project: ['create', 'project'],
+    update_project: ['update', 'project'],
+    delete_project: ['delete', 'project'],
+  };
+  const siteContentAction = siteContentActions[action];
+  if (siteContentAction) {
+    return runAdminSiteContentAction(siteContentAction[0], payload, siteContentAction[1]);
   }
   return runAdminSiteContentAction(action, payload);
 }

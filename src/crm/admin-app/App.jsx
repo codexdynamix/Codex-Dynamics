@@ -1110,7 +1110,7 @@ function App() {
           ? rest.commentHistory
           : (client.commentHistory || []).slice();
         if (rest.comment && !Array.isArray(rest.commentHistory)) {
-          nextHistory.push({
+          nextHistory.unshift({
             text: rest.comment,
             by: actorName,
             date: rest.lastCommentDate || new Date().toISOString().slice(0, 10),
@@ -1132,14 +1132,15 @@ function App() {
       }),
     }));
 
-    updateClientApi(clientId, rest).then((serverClient) => {
+    return updateClientApi(clientId, rest).then((serverClient) => {
       // Replace optimistic row with the canonical server row so the
       // commentHistory / statusHistory UI always reflects the source of truth.
-      if (!serverClient || !serverClient.id) return;
+      if (!serverClient || !serverClient.id) return null;
       setData((prev) => ({
         ...prev,
         clients: prev.clients.map((item) => (item.id === clientId ? { ...item, ...serverClient } : item)),
       }));
+      return serverClient;
     }).catch(async (error) => {
       console.error('[App] updateClient failed', error);
       let canonicalClient = originalClient;
@@ -1155,6 +1156,7 @@ function App() {
         }));
       }
       showNotification(error?.message || 'Failed to save client update to backend.');
+      return null;
     });
   };
 

@@ -114,6 +114,14 @@ class MongoService {
         return $result->getMatchedCount();
     }
 
+    public static function updateOneWithOperators(string $name, array $filter, array $operators): int {
+        $result = self::$client
+            ->selectDatabase(self::$databaseName)
+            ->selectCollection($name)
+            ->updateOne($filter, $operators);
+        return $result->getMatchedCount();
+    }
+
     public static function addToSetOne(string $name, array $filter, string $field, mixed $value): int {
         $result = self::$client
             ->selectDatabase(self::$databaseName)
@@ -321,12 +329,18 @@ function portalMailClientFromRequest(): array {
     if ($token === '' && preg_match('/^Bearer\s+(.+)$/i', trim($authorization), $match)) {
         $token = trim($match[1]);
     }
-    if (!preg_match('/^cdx_portal_(?:php_mongo|impersonate)_(.+)_(\d{10})$/', $token, $tokenMatch)) {
+    if (!preg_match('/^cdx_portal_(?:mongo|php_mongo|impersonate)_(.+)_(\d{10,13})$/', $token, $tokenMatch)) {
         jsonOut(['ok' => false, 'error' => 'Your portal session is invalid. Sign in again.'], 401);
     }
     $issuedAt = (int)$tokenMatch[2];
+    if (strlen($tokenMatch[2]) === 13) $issuedAt = (int)floor($issuedAt / 1000);
     if ($issuedAt > time() + 60 || time() - $issuedAt > 43200) {
         jsonOut(['ok' => false, 'error' => 'Your portal session has expired. Sign in again.'], 401);
+    }
+    $sessionId = 'client_' . $tokenMatch[1] . '_' . ($issuedAt * 1000);
+    $sessionRecord = MongoService::findOne('live_sessions', ['id' => $sessionId]);
+    if (($sessionRecord['revoked'] ?? false) === true) {
+        jsonOut(['ok' => false, 'error' => 'This portal session has been terminated. Sign in again.'], 401);
     }
     $client = MongoService::findOne('clients', ['id' => $tokenMatch[1]]);
     if (!$client || !hostingerMailClientIsActive($client)) {
@@ -335,27 +349,93 @@ function portalMailClientFromRequest(): array {
     if (!(bool)($client['portalEnabled'] ?? $client['portal_enabled'] ?? false)) {
         jsonOut(['ok' => false, 'error' => 'The client portal is disabled for this account.'], 403);
     }
+    $now = date('c');
+    $page = substr((string)(parse_url($_SERVER['REQUEST_URI'] ?? '/portal', PHP_URL_PATH) ?: '/portal'), 0, 300);
+    $visits = is_array($sessionRecord['page_visits'] ?? null) ? $sessionRecord['page_visits'] : [];
+    if (!$visits || ($visits[count($visits) - 1]['page'] ?? '') !== $page) {
+        $visits[] = ['page' => $page, 'visited_at' => $now];
+    }
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    MongoService::updateOneWithOptions('live_sessions', ['id' => $sessionId], [
+        'user_type' => 'client',
+        'user_id' => (string)$client['id'],
+        'client_id' => (string)$client['id'],
+        'display_name' => (string)($client['name'] ?? $client['full_name'] ?? $client['display_name'] ?? 'Client'),
+        'display_email' => (string)($client['email'] ?? ''),
+        'role' => 'Client',
+        'current_page' => $page,
+        'last_seen_at' => $now,
+        'is_online' => true,
+        'ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+        'user_agent' => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? $headers['User-Agent'] ?? ''), 0, 500),
+        'page_visits' => array_slice($visits, -100),
+        'logged_in_at' => date('c', $issuedAt),
+        'revoked' => false,
+    ], ['upsert' => true]);
     return $client;
 }
 
-function chatStaffFromRequest(): array {
+function adminSessionIdentityFromRequest(): ?array {
     $headers = function_exists('getallheaders') ? getallheaders() : [];
     $authorization = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? $headers['Authorization'] ?? $headers['authorization'] ?? '');
     $token = trim((string)($_COOKIE['cdx_admin_session'] ?? ''));
     if ($token === '' && preg_match('/^Bearer\s+(.+)$/i', trim($authorization), $bearerMatch)) {
         $token = trim($bearerMatch[1]);
     }
-    if (!preg_match('/^cdx_adm_(?:mongo|php_mongo)_(.+)_(\d{10,13})$/i', $token, $match)) {
+    if (!preg_match('/^cdx_adm_(?:mongo|php_mongo)_(.+)_(\d{10,13})$/i', $token, $match)) return null;
+    $issuedAt = (int)$match[2];
+    if (strlen($match[2]) === 10) $issuedAt *= 1000;
+    else $issuedAt = (int)floor($issuedAt / 1);
+    if ($issuedAt > (time() * 1000) + 60000 || (time() * 1000) - $issuedAt > 43200000) return null;
+    return ['staff_id' => $match[1], 'issued_at' => $issuedAt, 'id' => 'staff_' . $match[1] . '_' . $issuedAt];
+}
+
+function chatStaffFromRequest(): array {
+    $identity = adminSessionIdentityFromRequest();
+    if ($identity === null) {
         jsonOut(['ok' => false, 'error' => 'A valid staff session is required.'], 401);
     }
-    $issuedAt = (int)$match[2];
-    if (strlen($match[2]) === 13) $issuedAt = (int)floor($issuedAt / 1000);
-    if ($issuedAt > time() + 60 || time() - $issuedAt > 43200) {
-        jsonOut(['ok' => false, 'error' => 'The staff session has expired. Sign in again.'], 401);
+    $session = MongoService::findOne('live_sessions', ['id' => $identity['id']]);
+    if (($session['revoked'] ?? false) === true) {
+        jsonOut(['ok' => false, 'error' => 'This staff session has been terminated. Sign in again.'], 401);
     }
-    $staff = MongoService::findOne('staff_users', ['id' => $match[1]]);
+    $staff = MongoService::findOne('staff_users', ['id' => $identity['staff_id']]);
     if (!$staff || ($staff['status'] ?? '') === 'Suspended' || !empty($staff['deleted_at']) || ($staff['is_bin'] ?? false) === true) {
         jsonOut(['ok' => false, 'error' => 'The staff account is unavailable.'], 401);
+    }
+    return $staff;
+}
+
+function requireChatSuperAdminFromRequest(): array {
+    $staff = chatStaffFromRequest();
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+    if ($role !== 'superadmin') {
+        jsonOut(['ok' => false, 'error' => 'Only Super Admin can clear client history.'], 403);
+    }
+
+    function requireSessionSuperAdminFromRequest(): array {
+        $staff = chatStaffFromRequest();
+        $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+        if ($role !== 'superadmin') {
+            jsonOut(['ok' => false, 'error' => 'Only Super Admin can manage active sessions.'], 403);
+        }
+        return $staff;
+    }
+
+    function sessionApiTimestamp(mixed $value): int {
+        if (is_numeric($value)) return (int)$value;
+        $timestamp = $value ? strtotime((string)$value) : false;
+        return $timestamp === false ? 0 : $timestamp;
+    }
+
+    function sessionApiRow(array $row): array {
+        $lastSeen = sessionApiTimestamp($row['last_seen_at'] ?? null);
+        return array_merge($row, [
+            'logged_in_at' => (int)floor(sessionApiTimestamp($row['logged_in_at'] ?? null)),
+            'last_seen_at' => (int)floor($lastSeen),
+            'logged_out_at' => !empty($row['logged_out_at']) ? (int)floor(sessionApiTimestamp($row['logged_out_at'])) : null,
+            'is_online' => ($row['revoked'] ?? false) !== true && (time() - $lastSeen <= 90),
+        ]);
     }
     return $staff;
 }
@@ -822,8 +902,164 @@ if ($path === '/admin/me') {
 }
 
 if ($path === '/admin/logout') {
+    $identity = adminSessionIdentityFromRequest();
+    if ($identity !== null) {
+        MongoService::updateOne('live_sessions', ['id' => $identity['id']], [
+            'revoked' => true,
+            'is_online' => false,
+            'logged_out_at' => date('c'),
+        ]);
+    }
     adminClearSessionCookie();
     jsonOut(['ok' => true]);
+}
+
+if ($path === '/admin/presence' && $method === 'POST') {
+    $staff = chatStaffFromRequest();
+    $identity = adminSessionIdentityFromRequest();
+    if ($identity === null) jsonOut(['ok' => false, 'error' => 'A valid staff session is required.'], 401);
+    $existing = MongoService::findOne('live_sessions', ['id' => $identity['id']]);
+    if (($existing['revoked'] ?? false) === true) {
+        jsonOut(['ok' => false, 'error' => 'This staff session has been terminated. Sign in again.'], 401);
+    }
+    $page = substr((string)($body['page'] ?? '/admin'), 0, 300);
+    $visits = is_array($existing['page_visits'] ?? null) ? $existing['page_visits'] : [];
+    if (!$visits || ($visits[count($visits) - 1]['page'] ?? '') !== $page) {
+        $visits[] = ['page' => $page, 'visited_at' => date('c')];
+    }
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    MongoService::updateOneWithOptions('live_sessions', ['id' => $identity['id']], [
+        'user_type' => 'admin',
+        'admin_id' => (string)$staff['id'],
+        'user_id' => (string)$staff['id'],
+        'display_name' => (string)($staff['name'] ?? $staff['full_name'] ?? $staff['display_name'] ?? 'Staff member'),
+        'display_email' => (string)($staff['email'] ?? ''),
+        'role' => (string)($staff['role'] ?? 'Staff'),
+        'current_page' => $page,
+        'last_seen_at' => date('c'),
+        'is_online' => true,
+        'ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+        'user_agent' => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? $headers['User-Agent'] ?? ''), 0, 500),
+        'page_visits' => array_slice($visits, -100),
+        'logged_in_at' => date('c', (int)floor($identity['issued_at'] / 1000)),
+        'revoked' => false,
+    ], ['upsert' => true]);
+    $cutoff = date('c', time() - 90);
+    $activeCount = MongoService::countDocuments('live_sessions', [
+        'last_seen_at' => ['$gte' => $cutoff],
+        'revoked' => ['$ne' => true],
+    ]);
+    jsonOut(['ok' => true, 'activeUsers' => $activeCount]);
+}
+
+if ($path === '/admin/status' && $method === 'GET') {
+    chatStaffFromRequest();
+    $startedAt = microtime(true);
+    $cutoff = date('c', time() - 90);
+    $activeFilter = [
+        'last_seen_at' => ['$gte' => $cutoff],
+        'revoked' => ['$ne' => true],
+        'hidden' => ['$ne' => true],
+    ];
+    $onlineStaff = MongoService::countDocuments('live_sessions', $activeFilter + ['user_type' => 'admin']);
+    $onlineClients = MongoService::countDocuments('live_sessions', $activeFilter + ['user_type' => 'client']);
+    $portalLogins = MongoService::countDocuments('live_sessions', [
+        'user_type' => 'client',
+        'logged_in_at' => ['$gte' => date('c', strtotime('today'))],
+        'hidden' => ['$ne' => true],
+    ]);
+    jsonOut([
+        'ok' => true,
+        'online_total' => $onlineStaff + $onlineClients,
+        'online_staff' => $onlineStaff,
+        'online_clients' => $onlineClients,
+        'visitor_today' => $portalLogins,
+        'db_ms' => (int)round((microtime(true) - $startedAt) * 1000),
+    ]);
+}
+
+if ($path === '/admin/sessions' && $method === 'GET') {
+    requireSessionSuperAdminFromRequest();
+    $filter = ['hidden' => ['$ne' => true]];
+    $type = (string)($_GET['type'] ?? '');
+    if ($type === 'admin' || $type === 'client') $filter['user_type'] = $type;
+    $rows = MongoService::getCollection('live_sessions', $filter, 200, 0, ['last_seen_at' => -1]);
+    $sessions = array_map('sessionApiRow', $rows);
+    jsonOut(['ok' => true, 'sessions' => $sessions, 'total' => count($sessions), 'total_pages' => 1]);
+}
+
+if (preg_match('#^/admin/sessions/([^/]+)(?:/(logout))?$#', $path, $matches)) {
+    $staff = requireSessionSuperAdminFromRequest();
+    $sessionId = rawurldecode($matches[1]);
+    $isLogout = ($matches[2] ?? '') === 'logout';
+    if ($isLogout && $method === 'POST') {
+        $result = MongoService::updateOne('live_sessions', ['id' => $sessionId, 'hidden' => ['$ne' => true]], [
+            'revoked' => true,
+            'is_online' => false,
+            'logged_out_at' => date('c'),
+            'terminated_by' => (string)$staff['id'],
+        ]);
+        if ($result === 0) jsonOut(['ok' => false, 'error' => 'Session not found.'], 404);
+        jsonOut(['ok' => true]);
+    }
+    if (!$isLogout && $method === 'DELETE') {
+        $result = MongoService::updateOne('live_sessions', ['id' => $sessionId, 'hidden' => ['$ne' => true]], [
+            'revoked' => true,
+            'hidden' => true,
+            'is_online' => false,
+            'logged_out_at' => date('c'),
+            'terminated_by' => (string)$staff['id'],
+        ]);
+        if ($result === 0) jsonOut(['ok' => false, 'error' => 'Session not found.'], 404);
+        jsonOut(['ok' => true]);
+    }
+    if (!$isLogout && $method === 'GET') {
+        $row = MongoService::findOne('live_sessions', ['id' => $sessionId, 'hidden' => ['$ne' => true]]);
+        if ($row === null) jsonOut(['ok' => false, 'error' => 'Session not found.'], 404);
+        $relatedId = (string)($row['user_id'] ?? $row['admin_id'] ?? $row['client_id'] ?? '');
+        $related = $relatedId === '' ? [$row] : MongoService::getCollection('live_sessions', ['user_id' => $relatedId], 50, 0, ['last_seen_at' => -1]);
+        $durationTotal = 0;
+        $pageCounts = [];
+        foreach ($related as $relatedSession) {
+            $durationTotal += max(0, sessionApiTimestamp($relatedSession['last_seen_at'] ?? null) - sessionApiTimestamp($relatedSession['logged_in_at'] ?? null));
+            foreach (($relatedSession['page_visits'] ?? []) as $visit) {
+                $visitedPage = (string)($visit['page'] ?? '');
+                if ($visitedPage !== '') $pageCounts[$visitedPage] = ($pageCounts[$visitedPage] ?? 0) + 1;
+            }
+        }
+        arsort($pageCounts);
+        $topPages = [];
+        foreach (array_slice($pageCounts, 0, 10, true) as $page => $visits) {
+            $topPages[] = ['page' => $page, 'visits' => $visits];
+        }
+        $sessionCount = count($related) ?: 1;
+        jsonOut([
+            'ok' => true,
+            'session' => sessionApiRow($row),
+            'stats' => ['total_sessions' => $sessionCount, 'avg_duration_sec' => (int)floor($durationTotal / $sessionCount), 'total_time_sec' => $durationTotal],
+            'page_visits' => array_reverse($row['page_visits'] ?? []),
+            'top_pages' => $topPages,
+            'all_sessions' => array_map('sessionApiRow', $related),
+        ]);
+    }
+}
+
+if ($path === '/admin/sessions' && $method === 'DELETE') {
+    $staff = requireSessionSuperAdminFromRequest();
+    $ids = array_values(array_filter(array_map('strval', is_array($body['ids'] ?? null) ? $body['ids'] : [])));
+    $ids = array_slice($ids, 0, 200);
+    if (!$ids) jsonOut(['ok' => false, 'error' => 'Select at least one session.'], 400);
+    $terminated = MongoService::updateMany('live_sessions', [
+        'id' => ['$in' => $ids],
+        'hidden' => ['$ne' => true],
+    ], [
+        'revoked' => true,
+        'hidden' => true,
+        'is_online' => false,
+        'logged_out_at' => date('c'),
+        'terminated_by' => (string)$staff['id'],
+    ]);
+    jsonOut(['ok' => true, 'terminated' => $terminated]);
 }
 
 // 3. Admin Clients
@@ -961,7 +1197,7 @@ if ($path === '/admin/client-identity-reviews' && $method === 'GET') {
         buildClientIdentityReviews($clients, MongoService::getCollection('client_identity_reviews', [], 10000)),
         fn(array $review): bool => $status === 'all' || ($review['status'] ?? 'pending') === $status
     ));
-    jsonOut(['ok' => true, 'reviews' => $reviews]);
+    jsonOut(['ok' => true, 'reviews' => $reviews, 'clients_scanned' => count($clients)]);
 }
 
 if (preg_match('#^/admin/client-identity-reviews/([^/]+)/([^/]+)$#', $path, $matches) && $method === 'POST') {
@@ -1211,9 +1447,63 @@ if ($path === '/admin/clients/import' && $method === 'POST') {
     jsonOut(['ok' => true, 'count' => count($imported), 'imported' => count($imported), 'clients' => $imported]);
 }
 
-if (preg_match('#^/admin/clients/([^/]+)(?:/(restore))?$#', $path, $matches)) {
+if (preg_match('#^/admin/clients/([^/]+)/(comments|comments/([^/]+)|status-history|status-history/([^/]+))$#', $path, $historyMatch) && $method === 'DELETE') {
+    $staff = requireChatSuperAdminFromRequest();
+    $clientId = rawurldecode($historyMatch[1]);
+    $action = $historyMatch[2];
+    $client = MongoService::findOne('clients', ['id' => $clientId]);
+    if ($client === null) jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+
+    if ($action === 'comments' || $action === 'status-history') {
+        $updates = $action === 'comments'
+            ? ['comment_history' => [], 'commentHistory' => [], 'comment' => '', 'last_comment_date' => '']
+            : ['status_history' => [], 'statusHistory' => []];
+        $updates['updated_at'] = date('c');
+    } elseif (str_starts_with($action, 'comments/')) {
+        $commentId = rawurldecode((string)($historyMatch[3] ?? ''));
+        $comments = is_array($client['comment_history'] ?? null) && count($client['comment_history']) > 0
+            ? $client['comment_history']
+            : (is_array($client['commentHistory'] ?? null) ? $client['commentHistory'] : []);
+        $remainingComments = array_values(array_filter(
+            $comments,
+            static fn($entry) => (string)($entry['id'] ?? '') !== $commentId
+        ));
+        if (count($remainingComments) === count($comments)) {
+            jsonOut(['ok' => false, 'error' => 'Comment not found.'], 404);
+        }
+        usort($remainingComments, static fn($a, $b) => strtotime((string)($b['created_at'] ?? '')) <=> strtotime((string)($a['created_at'] ?? '')));
+        $latestComment = $remainingComments[0] ?? null;
+        $updates = [
+            'comment_history' => $remainingComments,
+            'commentHistory' => $remainingComments,
+            'comment' => (string)($latestComment['text'] ?? ''),
+            'last_comment_date' => substr((string)($latestComment['created_at'] ?? ''), 0, 10),
+        ];
+        $updates['updated_at'] = date('c');
+    } else {
+        $entryId = rawurldecode((string)($historyMatch[4] ?? ''));
+        $history = is_array($client['status_history'] ?? null) && count($client['status_history']) > 0
+            ? $client['status_history']
+            : (is_array($client['statusHistory'] ?? null) ? $client['statusHistory'] : []);
+        $remainingHistory = array_values(array_filter(
+            $history,
+            static fn($entry) => (string)($entry['id'] ?? '') !== $entryId
+        ));
+        if (count($remainingHistory) === count($history)) {
+            jsonOut(['ok' => false, 'error' => 'Status history entry not found.'], 404);
+        }
+        $updates = ['status_history' => $remainingHistory, 'statusHistory' => $remainingHistory];
+        $updates['updated_at'] = date('c');
+    }
+
+    MongoService::updateOne('clients', ['id' => $clientId], $updates);
+    jsonOut(['ok' => true, 'client' => MongoService::findOne('clients', ['id' => $clientId])]);
+}
+
+if (preg_match('#^/admin/clients/([^/]+)(?:/(restore|reset-status))?$#', $path, $matches)) {
     $clientId = rawurldecode($matches[1]);
-    $isRestore = ($matches[2] ?? '') === 'restore';
+    $subAction = $matches[2] ?? '';
+    $isRestore = $subAction === 'restore';
 
     if ($isRestore && $method === 'POST') {
         if (MongoService::updateOne('clients', ['id' => $clientId], [
@@ -1234,8 +1524,106 @@ if (preg_match('#^/admin/clients/([^/]+)(?:/(restore))?$#', $path, $matches)) {
         jsonOut(['ok' => true, 'client' => $client]);
     }
 
+    if ($subAction === 'reset-status' && $method === 'POST') {
+        requireChatSuperAdminFromRequest();
+        if (MongoService::updateOne('clients', ['id' => $clientId], [
+            'status' => 'New',
+            'stage' => 'New',
+            'status_history' => [],
+            'statusHistory' => [],
+            'updated_at' => date('c'),
+        ]) === 0) {
+            jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+        }
+        jsonOut(['ok' => true, 'client' => MongoService::findOne('clients', ['id' => $clientId])]);
+    }
+
     if (!$isRestore && $method === 'PATCH') {
-        if (MongoService::updateOne('clients', ['id' => $clientId], $body) === 0) {
+        $updates = $body;
+        unset($updates['_actorId'], $updates['_actorName']);
+        $requestedStage = $updates['stage'] ?? $updates['status'] ?? null;
+        $operators = ['$set' => $updates];
+        $staff = null;
+        $existing = null;
+        $historyKeys = ['comment_history', 'commentHistory', 'status_history', 'statusHistory'];
+        $includesHistoryMutation = false;
+        foreach ($historyKeys as $historyKey) {
+            if (array_key_exists($historyKey, $updates)) {
+                $includesHistoryMutation = true;
+                break;
+            }
+        }
+        if ($includesHistoryMutation) {
+            $staff = requireChatSuperAdminFromRequest();
+        }
+        if ($requestedStage !== null || array_key_exists('comment', $updates)) {
+            $staff = $staff ?? chatStaffFromRequest();
+            $existing = MongoService::findOne('clients', ['id' => $clientId]);
+            if ($existing === null) jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
+        }
+        if ($requestedStage !== null) {
+            if (!is_string($requestedStage) || trim($requestedStage) === '' || strlen(trim($requestedStage)) > 80) {
+                jsonOut(['ok' => false, 'error' => 'Choose a valid client status.'], 422);
+            }
+            $nextStage = trim($requestedStage);
+            $previousStage = (string)($existing['stage'] ?? $existing['status'] ?? 'New');
+            $operators['$set'] = array_merge($updates, [
+                'stage' => $nextStage,
+                'status' => $nextStage,
+                'updated_at' => date('c'),
+            ]);
+            if ($previousStage !== $nextStage) {
+                $staffName = trim((string)($staff['name'] ?? (($staff['firstName'] ?? $staff['first_name'] ?? '') . ' ' . ($staff['lastName'] ?? $staff['last_name'] ?? ''))));
+                $transition = [
+                    'id' => bin2hex(random_bytes(16)),
+                    'from_stage' => $previousStage,
+                    'to_stage' => $nextStage,
+                    'by_admin_id' => (string)($staff['id'] ?? ''),
+                    'by_name' => $staffName !== '' ? $staffName : (string)($staff['email'] ?? 'Staff'),
+                    'created_at' => date('c'),
+                ];
+                $history = is_array($existing['status_history'] ?? null) ? $existing['status_history'] : [];
+                $legacyHistory = is_array($existing['statusHistory'] ?? null) ? $existing['statusHistory'] : [];
+                if (count($history) === 0 && count($legacyHistory) > 0) {
+                    $operators['$set']['status_history'] = array_slice(array_merge($legacyHistory, [$transition]), -100);
+                } else {
+                    $operators['$push'] = array_merge($operators['$push'] ?? [], [
+                        'status_history' => [
+                            '$each' => [$transition],
+                            '$slice' => -100,
+                        ],
+                    ]);
+                }
+            }
+        }
+        if (array_key_exists('comment', $updates)) {
+            $comment = trim((string)$updates['comment']);
+            if ($comment === '' || strlen($comment) > 5000) {
+                jsonOut(['ok' => false, 'error' => 'Comment must contain 1 to 5000 characters.'], 422);
+            }
+            $staffName = trim((string)($staff['name'] ?? (($staff['firstName'] ?? $staff['first_name'] ?? '') . ' ' . ($staff['lastName'] ?? $staff['last_name'] ?? ''))));
+            $operators['$set']['comment'] = $comment;
+            $commentEntry = [
+                'id' => bin2hex(random_bytes(16)),
+                'text' => $comment,
+                'by_admin_id' => (string)($staff['id'] ?? ''),
+                'by_name' => $staffName !== '' ? $staffName : (string)($staff['email'] ?? 'Staff'),
+                'created_at' => date('c'),
+            ];
+            $history = is_array($existing['comment_history'] ?? null) ? $existing['comment_history'] : [];
+            $legacyHistory = is_array($existing['commentHistory'] ?? null) ? $existing['commentHistory'] : [];
+            if (count($history) === 0 && count($legacyHistory) > 0) {
+                $operators['$set']['comment_history'] = array_slice(array_merge($legacyHistory, [$commentEntry]), -200);
+            } else {
+                $operators['$push'] = array_merge($operators['$push'] ?? [], [
+                    'comment_history' => [
+                        '$each' => [$commentEntry],
+                        '$slice' => -200,
+                    ],
+                ]);
+            }
+        }
+        if (MongoService::updateOneWithOperators('clients', ['id' => $clientId], $operators) === 0) {
             jsonOut(['ok' => false, 'error' => 'Client not found.'], 404);
         }
         jsonOut([

@@ -23,11 +23,12 @@ export default function Sessions({ token }) {
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState([]);
   const [activeDetail, setActiveDetail] = useState(null);
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState(null);
+  const [loadError, setLoadError] = useState('');
 
-  const showToast = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(''), 3000);
+  const showToast = (msg, error = false) => {
+    setToast({ message: msg, error });
+    setTimeout(() => setToast(null), 3000);
   };
 
   const loadData = useCallback(async () => {
@@ -39,8 +40,10 @@ export default function Sessions({ token }) {
       ]);
       setSessions(sessRes?.sessions || []);
       if (statRes) setStats(statRes);
+      setLoadError('');
     } catch (err) {
       console.error('Error loading sessions:', err);
+      setLoadError(err?.message || 'Sessions could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -84,8 +87,8 @@ export default function Sessions({ token }) {
       await deleteSession(token, id);
       setSessions((prev) => prev.filter((s) => s.id !== id));
       showToast('Session terminated');
-    } catch {
-      showToast('Failed to terminate session');
+    } catch (err) {
+      showToast(err?.message || 'Failed to terminate session', true);
     }
   };
 
@@ -96,8 +99,8 @@ export default function Sessions({ token }) {
       setSessions((prev) => prev.filter((s) => !selectedIds.includes(s.id)));
       setSelectedIds([]);
       showToast(`${selectedIds.length} sessions cleared`);
-    } catch {
-      showToast('Bulk delete failed');
+    } catch (err) {
+      showToast(err?.message || 'Bulk termination failed', true);
     }
   };
 
@@ -106,8 +109,8 @@ export default function Sessions({ token }) {
       await forceLogoutSession(token, id);
       showToast('User logged out successfully');
       loadData();
-    } catch {
-      showToast('Force logout failed');
+    } catch (err) {
+      showToast(err?.message || 'Force logout failed', true);
     }
   };
 
@@ -116,7 +119,7 @@ export default function Sessions({ token }) {
       const detail = await getSessionDetail(token, id);
       setActiveDetail(detail);
     } catch (err) {
-      console.error(err);
+      showToast(err?.message || 'Session details could not be loaded', true);
     }
   };
 
@@ -142,11 +145,22 @@ export default function Sessions({ token }) {
 
   return (
     <div className="sess-page">
-      {toast && <div className="sess-toast sess-toast-success">{toast}</div>}
+      {toast && (
+        <div className={`sess-toast ${toast.error ? 'sess-toast-error' : 'sess-toast-success'}`} role="status">
+          {toast.message}
+        </div>
+      )}
+
+      {loadError && (
+        <div className="sess-load-error" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={loadData}>Retry</button>
+        </div>
+      )}
 
       <div className="sess-stats">
         <div className="sess-stat-card green">
-          <div className="sess-stat-num">{stats.online_total || sessions.length}</div>
+          <div className="sess-stat-num">{stats.online_total ?? 0}</div>
           <div className="sess-stat-lbl">Active Now</div>
         </div>
         <div className="sess-stat-card blue">
@@ -159,7 +173,7 @@ export default function Sessions({ token }) {
         </div>
         <div className="sess-stat-card">
           <div className="sess-stat-num">{stats.visitor_today || 0}</div>
-          <div className="sess-stat-lbl">Visitors Today</div>
+          <div className="sess-stat-lbl">Portal Logins Today</div>
         </div>
       </div>
 
@@ -373,6 +387,32 @@ export default function Sessions({ token }) {
                   <span className="sess-info-val">{activeDetail.session?.current_page || '-'}</span>
                 </div>
               </div>
+              {activeDetail.top_pages?.length > 0 && (
+                <div className="sess-detail-history">
+                  <h3>Most visited pages</h3>
+                  <ul>
+                    {activeDetail.top_pages.map((item) => (
+                      <li key={item.page}>
+                        <span>{item.page}</span>
+                        <strong>{item.visits}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {activeDetail.page_visits?.length > 0 && (
+                <div className="sess-detail-history">
+                  <h3>Recent pages</h3>
+                  <ul>
+                    {activeDetail.page_visits.slice(0, 10).map((item, index) => (
+                      <li key={`${item.page}-${item.visited_at}-${index}`}>
+                        <span>{item.page}</span>
+                        <time>{item.visited_at ? new Date(item.visited_at).toLocaleString() : '-'}</time>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         </div>

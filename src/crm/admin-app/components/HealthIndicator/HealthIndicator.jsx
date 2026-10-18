@@ -11,7 +11,9 @@ export default function HealthIndicator({ token }) {
     try {
       const data = await getAdminStatus(token);
       if (data) setStatus(data);
-    } catch (_) {}
+    } catch (error) {
+      console.warn('Unable to load CRM system status:', error);
+    }
   };
 
   useEffect(() => {
@@ -73,7 +75,7 @@ export default function HealthIndicator({ token }) {
             <span className="hi-popup-val hi-green">{status.online_clients}</span>
           </div>
           <div className="hi-popup-row">
-            <span className="hi-popup-key">Visitors today</span>
+            <span className="hi-popup-key">Portal logins today</span>
             <span className="hi-popup-val">{status.visitor_today}</span>
           </div>
           <div className="hi-popup-footer">Updates every 15 s</div>

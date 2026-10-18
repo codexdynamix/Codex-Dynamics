@@ -39,7 +39,7 @@ function clearAdminSessionCookie(req: Request, res: Response) {
   });
 }
 const seededSuperAdmin = SEED_STAFF.find((staff) => staff.id === 'staff_super_admin');
-async function requireChatStaff(req: Request, res: Response) {
+function getAdminSessionIdentity(req: Request) {
   const authorization = String(req.headers.authorization || '');
   const cookieToken = String(req.headers.cookie || '')
     .split(';')
@@ -48,18 +48,41 @@ async function requireChatStaff(req: Request, res: Response) {
     ?.slice('cdx_admin_session='.length) || '';
   const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || cookieToken;
   const match = token.match(/^cdx_adm_(?:mongo|php_mongo)_(.+)_(\d{10,13})$/);
-  if (!match) {
+  if (!match) return null;
+  const issuedAt = Number(match[2]) * (match[2].length === 10 ? 1000 : 1);
+  if (!Number.isFinite(issuedAt) || issuedAt > Date.now() + 60_000 || Date.now() - issuedAt > 12 * 60 * 60 * 1000) {
+    return null;
+  }
+  return {
+    staffId: match[1],
+    issuedAt,
+    id: `staff_${match[1]}_${issuedAt}`,
+  };
+}
+async function requireChatStaff(req: Request, res: Response) {
+  const identity = getAdminSessionIdentity(req);
+  if (!identity) {
     res.status(401).json({ ok: false, error: 'A valid staff session is required.' });
     return null;
   }
-  const issuedAt = Number(match[2]) * (match[2].length === 10 ? 1000 : 1);
-  if (!Number.isFinite(issuedAt) || issuedAt > Date.now() + 60_000 || Date.now() - issuedAt > 12 * 60 * 60 * 1000) {
-    res.status(401).json({ ok: false, error: 'The staff session has expired. Sign in again.' });
+  const sessions = getMongoCollection('live_sessions');
+  const session = await sessions.findOne({ id: identity.id });
+  if (session?.revoked === true) {
+    res.status(401).json({ ok: false, error: 'This staff session has been terminated. Sign in again.' });
     return null;
   }
-  const staff = await getMongoCollection('staff_users').findOne({ id: match[1] });
+  const staff = await getMongoCollection('staff_users').findOne({ id: identity.staffId });
   if (!staff || staff.status === 'Suspended' || staff.deleted_at || staff.is_bin === true) {
     res.status(401).json({ ok: false, error: 'The staff account is unavailable.' });
+    return null;
+  }
+  return staff;
+}
+async function requireChatSuperAdmin(req: Request, res: Response) {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return null;
+  if (normalizeAdminRole(staff.role) !== 'Super Admin') {
+    res.status(403).json({ ok: false, error: 'Only Super Admin can clear client history.' });
     return null;
   }
   return staff;
@@ -372,7 +395,14 @@ apiRouter.post('/admin/me/password', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.post('/admin/logout', (req: Request, res: Response) => {
+apiRouter.post('/admin/logout', async (req: Request, res: Response) => {
+  const identity = getAdminSessionIdentity(req);
+  if (identity) {
+    await getMongoCollection('live_sessions').updateOne(
+      { id: identity.id },
+      { $set: { revoked: true, is_online: false, logged_out_at: new Date().toISOString() } }
+    );
+  }
   clearAdminSessionCookie(req, res);
   res.json({ ok: true });
 });
@@ -609,9 +639,99 @@ apiRouter.get('/admin/clients/:id', async (req: Request, res: Response) => {
 });
 
 apiRouter.patch('/admin/clients/:id', async (req: Request, res: Response) => {
-  await getMongoCollection('clients').updateOne({ id: req.params.id }, { $set: req.body });
-  const client = await getMongoCollection('clients').findOne({ id: req.params.id });
-  res.json({ ok: true, client });
+  const clients = getMongoCollection('clients');
+  const updates = { ...(req.body || {}) };
+  const requestedStage = updates.stage ?? updates.status;
+  const historyKeys = ['comment_history', 'commentHistory', 'status_history', 'statusHistory'];
+  const includesHistoryMutation = historyKeys.some((key) => Object.prototype.hasOwnProperty.call(updates, key));
+  delete updates._actorId;
+  delete updates._actorName;
+
+  const update: Record<string, any> = { $set: updates };
+  let staff: Record<string, any> | null = null;
+  let existing: Record<string, any> | null = null;
+  if (includesHistoryMutation || requestedStage !== undefined || updates.comment !== undefined) {
+    staff = includesHistoryMutation
+      ? await requireChatSuperAdmin(req, res)
+      : await requireChatStaff(req, res);
+    if (!staff) return;
+  }
+  if (requestedStage !== undefined || updates.comment !== undefined) {
+    existing = await clients.findOne({ id: req.params.id });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  }
+  if (requestedStage !== undefined) {
+    const nextStage = typeof requestedStage === 'string' ? requestedStage.trim() : '';
+    if (!nextStage || nextStage.length > 80) {
+      return res.status(422).json({ ok: false, error: 'Choose a valid client status.' });
+    }
+    const previousStage = String(existing?.stage || existing?.status || 'New');
+    update.$set = {
+      ...updates,
+      stage: nextStage,
+      status: nextStage,
+      updated_at: new Date().toISOString(),
+    };
+    if (previousStage !== nextStage) {
+      const staffName = String(
+        staff?.name
+        || `${staff?.firstName || staff?.first_name || ''} ${staff?.lastName || staff?.last_name || ''}`.trim()
+        || staff?.email
+        || 'Staff'
+      );
+      const transition = {
+        id: randomUUID(),
+        from_stage: previousStage,
+        to_stage: nextStage,
+        by_admin_id: String(staff?.id || ''),
+        by_name: staffName,
+        created_at: new Date().toISOString(),
+      };
+      const history = Array.isArray(existing?.status_history) ? existing.status_history : [];
+      const legacyHistory = Array.isArray(existing?.statusHistory) ? existing.statusHistory : [];
+      if (history.length === 0 && legacyHistory.length > 0) {
+        update.$set.status_history = [...legacyHistory, transition].slice(-100);
+      } else {
+        update.$push = {
+          ...(update.$push || {}),
+          status_history: { $each: [transition], $slice: -100 },
+        };
+      }
+    }
+  }
+  if (updates.comment !== undefined) {
+    if (typeof updates.comment !== 'string' || !updates.comment.trim() || updates.comment.trim().length > 5000) {
+      return res.status(422).json({ ok: false, error: 'Comment must contain 1 to 5000 characters.' });
+    }
+    const staffName = String(
+      staff?.name
+      || `${staff?.firstName || staff?.first_name || ''} ${staff?.lastName || staff?.last_name || ''}`.trim()
+      || staff?.email
+      || 'Staff'
+    );
+    update.$set.comment = updates.comment.trim();
+    const commentEntry = {
+      id: randomUUID(),
+      text: updates.comment.trim(),
+      by_admin_id: String(staff?.id || ''),
+      by_name: staffName,
+      created_at: new Date().toISOString(),
+    };
+    const history = Array.isArray(existing?.comment_history) ? existing.comment_history : [];
+    const legacyHistory = Array.isArray(existing?.commentHistory) ? existing.commentHistory : [];
+    if (history.length === 0 && legacyHistory.length > 0) {
+      update.$set.comment_history = [...legacyHistory, commentEntry].slice(-200);
+    } else {
+      update.$push = {
+        ...(update.$push || {}),
+        comment_history: { $each: [commentEntry], $slice: -200 },
+      };
+    }
+  }
+
+  const result = await clients.updateOne({ id: req.params.id }, update);
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  return res.json({ ok: true, client: await clients.findOne({ id: req.params.id }) });
 });
 
 apiRouter.delete('/admin/clients/:id', async (req: Request, res: Response) => {
@@ -719,13 +839,86 @@ apiRouter.post('/admin/clients/:id/assign', async (req: Request, res: Response) 
 });
 
 apiRouter.post('/admin/clients/:id/reset-status', async (req: Request, res: Response) => {
-  await getMongoCollection('clients').updateOne({ id: req.params.id }, { $set: { status: 'New', stage: 'New' } });
-  const client = await getMongoCollection('clients').findOne({ id: req.params.id });
-  res.json({ ok: true, client });
+  const staff = await requireChatSuperAdmin(req, res);
+  if (!staff) return;
+  const clients = getMongoCollection('clients');
+  const result = await clients.updateOne(
+    { id: req.params.id },
+    { $set: { status: 'New', stage: 'New', status_history: [], statusHistory: [], updated_at: new Date().toISOString() } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  return res.json({ ok: true, client: await clients.findOne({ id: req.params.id }) });
 });
 
-apiRouter.all('/admin/clients/:id/comments', (_req: Request, res: Response) => {
-  res.json({ ok: true });
+apiRouter.delete('/admin/clients/:id/comments', async (req: Request, res: Response) => {
+  const staff = await requireChatSuperAdmin(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('clients').updateOne(
+    { id: req.params.id },
+    { $set: { comment_history: [], commentHistory: [], comment: '', last_comment_date: '', updated_at: new Date().toISOString() } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  return res.json({ ok: true, client: await getMongoCollection('clients').findOne({ id: req.params.id }) });
+});
+
+apiRouter.delete('/admin/clients/:id/comments/:commentId', async (req: Request, res: Response) => {
+  const staff = await requireChatSuperAdmin(req, res);
+  if (!staff) return;
+  const clients = getMongoCollection('clients');
+  const client = await clients.findOne({ id: req.params.id });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  const comments = Array.isArray(client.comment_history) && client.comment_history.length
+    ? client.comment_history
+    : (Array.isArray(client.commentHistory) ? client.commentHistory : []);
+  const filtered = comments.filter((entry: Record<string, unknown>) => String(entry.id || '') !== req.params.commentId);
+  if (filtered.length === comments.length) return res.status(404).json({ ok: false, error: 'Comment not found.' });
+  const latestComment = [...filtered].sort(
+    (a: Record<string, any>, b: Record<string, any>) =>
+      new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+  )[0];
+  await clients.updateOne(
+    { id: req.params.id },
+    {
+      $set: {
+        comment_history: filtered,
+        commentHistory: filtered,
+        comment: String(latestComment?.text || ''),
+        last_comment_date: String(latestComment?.created_at || '').slice(0, 10),
+        updated_at: new Date().toISOString(),
+      },
+    }
+  );
+  return res.json({ ok: true, client: await clients.findOne({ id: req.params.id }) });
+});
+
+apiRouter.delete('/admin/clients/:id/status-history', async (req: Request, res: Response) => {
+  const staff = await requireChatSuperAdmin(req, res);
+  if (!staff) return;
+  const clients = getMongoCollection('clients');
+  const result = await clients.updateOne(
+    { id: req.params.id },
+    { $set: { status_history: [], statusHistory: [], updated_at: new Date().toISOString() } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  return res.json({ ok: true, client: await clients.findOne({ id: req.params.id }) });
+});
+
+apiRouter.delete('/admin/clients/:id/status-history/:entryId', async (req: Request, res: Response) => {
+  const staff = await requireChatSuperAdmin(req, res);
+  if (!staff) return;
+  const clients = getMongoCollection('clients');
+  const client = await clients.findOne({ id: req.params.id });
+  if (!client) return res.status(404).json({ ok: false, error: 'Client not found.' });
+  const history = Array.isArray(client.status_history) && client.status_history.length
+    ? client.status_history
+    : (Array.isArray(client.statusHistory) ? client.statusHistory : []);
+  const filtered = history.filter((entry: Record<string, unknown>) => String(entry.id || '') !== req.params.entryId);
+  if (filtered.length === history.length) return res.status(404).json({ ok: false, error: 'Status history entry not found.' });
+  await clients.updateOne(
+    { id: req.params.id },
+    { $set: { status_history: filtered, statusHistory: filtered, updated_at: new Date().toISOString() } }
+  );
+  return res.json({ ok: true, client: await clients.findOne({ id: req.params.id }) });
 });
 
 apiRouter.all('/admin/clients/:id/profile-permissions', async (req: Request, res: Response) => {
@@ -1036,7 +1229,7 @@ apiRouter.get('/admin/client-identity-reviews', async (_req: Request, res: Respo
   ]);
   const reviews = buildClientIdentityReviews(clients, savedReviews)
     .filter((review) => status === 'all' || review.status === status);
-  res.json({ ok: true, reviews });
+  res.json({ ok: true, reviews, clients_scanned: clients.length });
 });
 
 apiRouter.post('/admin/client-identity-reviews/:clientIdA/:clientIdB', async (req: Request, res: Response) => {
@@ -2371,8 +2564,183 @@ apiRouter.all('/admin/audit', async (req: Request, res: Response) => {
   res.json({ ok: true, logs });
 });
 
-apiRouter.all('/admin/presence', (_req: Request, res: Response) => {
-  res.json({ ok: true, activeUsers: 1 });
+function sessionTimestamp(value: unknown) {
+  if (typeof value === 'number') return value;
+  const timestamp = value ? new Date(String(value)).getTime() : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sessionToApi(row: Record<string, any>) {
+  const { _id, ...session } = row;
+  return {
+    ...session,
+    logged_in_at: Math.floor(sessionTimestamp(session.logged_in_at) / 1000),
+    last_seen_at: Math.floor(sessionTimestamp(session.last_seen_at) / 1000),
+    logged_out_at: session.logged_out_at ? Math.floor(sessionTimestamp(session.logged_out_at) / 1000) : null,
+    is_online: session.revoked !== true && Date.now() - sessionTimestamp(session.last_seen_at) <= 90_000,
+  };
+}
+
+async function requireSessionSuperAdmin(req: Request, res: Response) {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return null;
+  if (normalizeAdminRole(staff.role) !== 'Super Admin') {
+    res.status(403).json({ ok: false, error: 'Only Super Admin can manage active sessions.' });
+    return null;
+  }
+  return staff;
+}
+
+apiRouter.post('/admin/presence', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const identity = getAdminSessionIdentity(req);
+  if (!identity) return res.status(401).json({ ok: false, error: 'A valid staff session is required.' });
+
+  const sessions = getMongoCollection('live_sessions');
+  const existing = await sessions.findOne({ id: identity.id });
+  if (existing?.revoked === true) {
+    return res.status(401).json({ ok: false, error: 'This staff session has been terminated. Sign in again.' });
+  }
+  const now = new Date().toISOString();
+  const page = String(req.body?.page || '/admin').slice(0, 300);
+  const pageVisits = Array.isArray(existing?.page_visits) ? existing.page_visits : [];
+  if (!pageVisits.length || pageVisits[pageVisits.length - 1]?.page !== page) {
+    pageVisits.push({ page, visited_at: now });
+  }
+  await sessions.updateOne(
+    { id: identity.id },
+    {
+      $set: {
+        id: identity.id,
+        user_type: 'admin',
+        admin_id: String(staff.id),
+        display_name: String(staff.name || staff.full_name || staff.display_name || 'Staff member'),
+        display_email: String(staff.email || ''),
+        role: String(staff.role || 'Staff'),
+        current_page: page,
+        last_seen_at: now,
+        is_online: true,
+        ip: String(req.ip || ''),
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 500),
+        page_visits: pageVisits.slice(-100),
+      },
+      $setOnInsert: { logged_in_at: new Date(identity.issuedAt).toISOString(), revoked: false },
+    },
+    { upsert: true }
+  );
+  res.json({ ok: true, activeUsers: await sessions.countDocuments({ last_seen_at: { $gte: new Date(Date.now() - 90_000).toISOString() }, revoked: { $ne: true } }) });
+});
+
+apiRouter.get('/admin/status', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  const startedAt = Date.now();
+  const cutoff = new Date(Date.now() - 90_000).toISOString();
+  const sessions = getMongoCollection('live_sessions');
+  const active = await sessions.find({ last_seen_at: { $gte: cutoff }, revoked: { $ne: true }, hidden: { $ne: true } });
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const portalLogins = await sessions.countDocuments({
+    user_type: 'client',
+    logged_in_at: { $gte: today.toISOString() },
+    hidden: { $ne: true },
+  });
+  const onlineStaff = active.filter((row) => row.user_type === 'admin').length;
+  const onlineClients = active.filter((row) => row.user_type === 'client').length;
+  res.json({
+    ok: true,
+    online_total: onlineStaff + onlineClients,
+    online_staff: onlineStaff,
+    online_clients: onlineClients,
+    visitor_today: portalLogins,
+    db_ms: Date.now() - startedAt,
+  });
+});
+
+apiRouter.get('/admin/sessions', async (req: Request, res: Response) => {
+  const staff = await requireSessionSuperAdmin(req, res);
+  if (!staff) return;
+  const type = String(req.query.type || '');
+  const filter: Record<string, any> = { hidden: { $ne: true } };
+  if (type === 'admin') filter.user_type = 'admin';
+  if (type === 'client') filter.user_type = 'client';
+  const rows = await getMongoCollection('live_sessions').find(filter, { sort: { last_seen_at: -1 }, limit: 200 });
+  const sessions = rows.map(sessionToApi);
+  res.json({ ok: true, sessions, total: sessions.length, total_pages: 1 });
+});
+
+apiRouter.get('/admin/sessions/:id', async (req: Request, res: Response) => {
+  const staff = await requireSessionSuperAdmin(req, res);
+  if (!staff) return;
+  const sessions = getMongoCollection('live_sessions');
+  const row = await sessions.findOne({ id: String(req.params.id) });
+  if (!row || row.hidden === true) return res.status(404).json({ ok: false, error: 'Session not found.' });
+  const relatedId = row.user_id || row.admin_id || row.client_id;
+  const related = relatedId
+    ? await sessions.find({ user_id: relatedId }, { sort: { last_seen_at: -1 }, limit: 50 })
+    : [row];
+  const durations = related.map((item) => Math.max(0, Math.floor(
+    (sessionTimestamp(item.last_seen_at) - sessionTimestamp(item.logged_in_at)) / 1000
+  )));
+  const duration = durations.reduce((total, value) => total + value, 0);
+  const pageCounts = new Map<string, number>();
+  for (const item of related) {
+    for (const visit of Array.isArray(item.page_visits) ? item.page_visits : []) {
+      const visitedPage = String(visit?.page || '');
+      if (visitedPage) pageCounts.set(visitedPage, (pageCounts.get(visitedPage) || 0) + 1);
+    }
+  }
+  const topPages = [...pageCounts.entries()]
+    .map(([page, visits]) => ({ page, visits }))
+    .sort((a, b) => b.visits - a.visits)
+    .slice(0, 10);
+  res.json({
+    ok: true,
+    session: sessionToApi(row),
+    stats: {
+      total_sessions: related.length || 1,
+      avg_duration_sec: related.length ? Math.floor(duration / related.length) : 0,
+      total_time_sec: duration,
+    },
+    page_visits: (row.page_visits || []).slice().reverse(),
+    top_pages: topPages,
+    all_sessions: related.map(sessionToApi),
+  });
+});
+
+apiRouter.post('/admin/sessions/:id/logout', async (req: Request, res: Response) => {
+  const staff = await requireSessionSuperAdmin(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('live_sessions').updateOne(
+    { id: String(req.params.id), hidden: { $ne: true } },
+    { $set: { revoked: true, is_online: false, logged_out_at: new Date().toISOString(), terminated_by: staff.id } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Session not found.' });
+  res.json({ ok: true });
+});
+
+apiRouter.delete('/admin/sessions/:id', async (req: Request, res: Response) => {
+  const staff = await requireSessionSuperAdmin(req, res);
+  if (!staff) return;
+  const result = await getMongoCollection('live_sessions').updateOne(
+    { id: String(req.params.id), hidden: { $ne: true } },
+    { $set: { revoked: true, hidden: true, is_online: false, logged_out_at: new Date().toISOString(), terminated_by: staff.id } }
+  );
+  if (!result.matchedCount) return res.status(404).json({ ok: false, error: 'Session not found.' });
+  res.json({ ok: true });
+});
+
+apiRouter.delete('/admin/sessions', async (req: Request, res: Response) => {
+  const staff = await requireSessionSuperAdmin(req, res);
+  if (!staff) return;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean).slice(0, 200) : [];
+  if (!ids.length) return res.status(400).json({ ok: false, error: 'Select at least one session.' });
+  const result = await getMongoCollection('live_sessions').updateMany(
+    { id: { $in: ids }, hidden: { $ne: true } },
+    { $set: { revoked: true, hidden: true, is_online: false, logged_out_at: new Date().toISOString(), terminated_by: staff.id } }
+  );
+  res.json({ ok: true, terminated: result.modifiedCount });
 });
 
 // ---------------------------------------------------------------------------
@@ -2629,14 +2997,21 @@ async function portalTicketClient(req: Request, res: Response) {
     .find((part) => part.startsWith('cdx_portal_session='))
     ?.slice('cdx_portal_session='.length) || '';
   const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || decodeURIComponent(cookieToken);
-  const match = token.match(/^cdx_portal_(?:mongo|impersonate)_(.+)_(\d{13})$/);
+  const match = token.match(/^cdx_portal_(?:mongo|php_mongo|impersonate)_(.+)_(\d{10,13})$/);
   if (!match) {
     res.status(401).json({ ok: false, error: 'Your portal session is invalid. Sign in again.' });
     return null;
   }
-  const issuedAt = Number(match[2]);
+  const issuedAt = Number(match[2]) * (match[2].length === 10 ? 1000 : 1);
   if (!Number.isFinite(issuedAt) || issuedAt > Date.now() + 60_000 || Date.now() - issuedAt > 12 * 60 * 60 * 1000) {
     res.status(401).json({ ok: false, error: 'Your portal session has expired. Sign in again.' });
+    return null;
+  }
+  const sessionId = `client_${match[1]}_${issuedAt}`;
+  const sessions = getMongoCollection('live_sessions');
+  const sessionRecord = await sessions.findOne({ id: sessionId });
+  if (sessionRecord?.revoked === true) {
+    res.status(401).json({ ok: false, error: 'This portal session has been terminated. Sign in again.' });
     return null;
   }
   const client = await getMongoCollection('clients').findOne({ id: match[1] });
@@ -2648,6 +3023,34 @@ async function portalTicketClient(req: Request, res: Response) {
     res.status(403).json({ ok: false, error: 'The client portal is disabled for this account.' });
     return null;
   }
+  const now = new Date().toISOString();
+  const page = String(req.path || '/portal').slice(0, 300);
+  const pageVisits = Array.isArray(sessionRecord?.page_visits) ? sessionRecord.page_visits : [];
+  if (!pageVisits.length || pageVisits[pageVisits.length - 1]?.page !== page) {
+    pageVisits.push({ page, visited_at: now });
+  }
+  await sessions.updateOne(
+    { id: sessionId },
+    {
+      $set: {
+        id: sessionId,
+        user_type: 'client',
+        user_id: String(client.id),
+        client_id: String(client.id),
+        display_name: String(client.name || client.full_name || client.display_name || 'Client'),
+        display_email: String(client.email || ''),
+        role: 'Client',
+        current_page: page,
+        last_seen_at: now,
+        is_online: true,
+        ip: String(req.ip || ''),
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 500),
+        page_visits: pageVisits.slice(-100),
+      },
+      $setOnInsert: { logged_in_at: new Date(issuedAt).toISOString(), revoked: false },
+    },
+    { upsert: true }
+  );
   return client;
 }
 

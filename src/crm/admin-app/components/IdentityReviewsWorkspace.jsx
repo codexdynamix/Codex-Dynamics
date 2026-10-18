@@ -33,6 +33,7 @@ function ClientIdentity({ side, name, company, email, phone, clientId }) {
 
 export default function IdentityReviewsWorkspace({
   reviews = [],
+  clientsScanned = null,
   loading = false,
   error = '',
   onReload = () => {},
@@ -154,7 +155,11 @@ export default function IdentityReviewsWorkspace({
       {!loading && !error && reviews.length === 0 && <div className="crm-inline-38d180080d" data-testid="empty-identity-reviews">
         <span aria-hidden="true" className="crm-inline-df38bf24b8">?</span>
         <h3 className="crm-inline-b2ce718d54">{statusFilter === 'pending' ? 'No identity reviews waiting' : 'No matching identity reviews'}</h3>
-        <p className="crm-inline-b09a9a5b62">Potential duplicates with matching email addresses or phone numbers appear here automatically.</p>
+        <p className="crm-inline-b09a9a5b62" data-testid="identity-review-empty-explanation">
+          {clientsScanned !== null && clientsScanned < 2
+            ? `${clientsScanned === 1 ? 'Only one active client record is' : `Only ${clientsScanned} active client records are`} available; at least two are needed to form a pair. Records in Recycle Bin are excluded.`
+            : `No active client records share an email address or phone number${clientsScanned === null ? '' : ` across ${clientsScanned} clients`}. Potential duplicates appear here automatically.`}
+        </p>
       </div>}
 
       {!loading && reviews.length > 0 && filteredReviews.length === 0 && <div className="crm-inline-2c8f469258" data-testid="empty-filtered-identity-reviews">No reviews match your search or status filter.</div>}

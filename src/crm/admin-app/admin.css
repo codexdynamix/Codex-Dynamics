@@ -3269,6 +3269,29 @@
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.005em;
   }
+  .crm-admin-app.crm-admin-app .crm-profile-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    min-width: 0;
+  }
+  .crm-admin-app.crm-admin-app .crm-history-clear-btn {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid var(--color-border-primary);
+    border-radius: var(--border-radius-md);
+    background: var(--color-surface-2);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+  }
+  .crm-admin-app.crm-admin-app .crm-history-clear-btn:hover {
+    border-color: var(--color-accent-red);
+    color: var(--color-accent-red);
+  }
   .crm-admin-app.crm-admin-app .crm-comment-input-area {
     display: flex;
     flex-direction: column;
@@ -3339,7 +3362,22 @@
     color: var(--color-accent-yellow);
     font-weight: var(--font-weight-semibold);
   }
-  .crm-admin-app.crm-admin-app .crm-comment-date { color: var(--color-text-tertiary); }
+  .crm-admin-app.crm-admin-app .crm-comment-date {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--color-text-tertiary);
+    text-align: right;
+  }
+  .crm-admin-app.crm-admin-app .crm-comment-date > span {
+    white-space: nowrap;
+  }
+  .crm-admin-app.crm-admin-app .crm-comment-date .crm-inline-107472a404 {
+    flex: 0 0 auto;
+    margin-left: 0;
+  }
   .crm-admin-app.crm-admin-app .crm-comment-text {
     color: var(--color-text-primary);
     font-size: var(--font-size-sm);
@@ -3361,6 +3399,9 @@
     margin: 0;
     padding: 0;
     list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
   }
   .crm-admin-app.crm-admin-app .crm-status-timeline-empty {
     color: var(--color-text-tertiary);
@@ -3371,15 +3412,23 @@
   }
   .crm-admin-app.crm-admin-app .crm-status-timeline-row {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     gap: var(--space-md);
     padding: var(--space-md);
     background: var(--color-surface-2);
     border: 1px solid var(--color-border-primary);
     border-radius: var(--border-radius-md);
     position: relative;
+    min-width: 0;
   }
-  .crm-admin-app.crm-admin-app .crm-status-timeline-arrow,
+  .crm-admin-app.crm-admin-app .crm-status-timeline-arrow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    min-width: 0;
+  }
   .crm-admin-app.crm-admin-app .crm-status-pill-arrow {
     color: var(--color-text-tertiary);
     font-size: var(--font-size-md);
@@ -3398,12 +3447,15 @@
     white-space: nowrap;
   }
   .crm-admin-app.crm-admin-app .crm-status-timeline-meta {
-    margin-left: auto;
+    margin-left: 0;
     display: flex;
-    align-items: center;
-    gap: var(--space-md);
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px var(--space-md);
     color: var(--color-text-secondary);
     font-size: var(--font-size-xs);
+    min-width: 0;
   }
   .crm-admin-app.crm-admin-app .crm-status-timeline-meta .crm-by { color: var(--color-text-tertiary); }
   .crm-admin-app.crm-admin-app .crm-delete-entry-btn {
@@ -3411,8 +3463,14 @@
     border: 1px solid transparent;
     color: var(--color-text-tertiary);
     border-radius: var(--border-radius-sm);
-    width: 28px; height: 28px;
-    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 30px;
+    width: auto;
+    height: auto;
+    padding: 4px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
     cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
   }
@@ -3420,6 +3478,19 @@
     background: rgba(246, 70, 93, 0.1);
     color: var(--color-accent-red);
     border-color: rgba(246, 70, 93, 0.3);
+  }
+  .crm-admin-app.crm-admin-app .crm-status-timeline-row > .crm-inline-9a325a2ee1 {
+    display: flex;
+    justify-content: flex-end;
+  }
+  @media (max-width: 600px) {
+    .crm-admin-app.crm-admin-app .crm-profile-history-header {
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .crm-admin-app.crm-admin-app .crm-status-timeline-meta {
+      flex-direction: column;
+    }
   }
 
   /* Status badges (color-coded) */

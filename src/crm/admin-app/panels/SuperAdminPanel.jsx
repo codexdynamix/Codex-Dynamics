@@ -40,7 +40,7 @@ import {
   bulkAssignClientsApi, bulkAssignClientAssignmentsApi, deleteOffice, deleteTeam, deleteStaffApi, updateOffice, updateTeam,
   listAdminClients, getAdminClientProjects, createAdminClientProject, updateAdminClientProject, archiveAdminClientProject,
   getAdminClientIdentityReviews, resolveAdminClientIdentityReview,
-  createStaffApi, updateStaffApi, resetClientstatusApi, clearClientCommentsApi,
+  createStaffApi, updateStaffApi, resetClientstatusApi, clearClientCommentsApi, clearClientStatusHistoryApi,
   updateClientApi, deleteClientApi, restoreClientApi,
   getClientNotificationsAsAdmin, getAdminPendingCounts,
   restoreOfficeApi, restoreTeamApi, restoreStaffApi, deleteOfficePermanent, deleteTeamPermanent,
@@ -646,29 +646,20 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
     if (profileComment.trim()) apiUpdates.comment = profileComment.trim();
 
     if (Object.keys(apiUpdates).length > 0) {
-      // Optimistic local update so the list reflects changes immediately.
-      const now = new Date().toISOString();
-      const optimisticHistory = [...(profileClient.commentHistory || [])];
-      if (apiUpdates.comment) {
-        optimisticHistory.push({ text: apiUpdates.comment, by: 'You', date: now.slice(0, 10), createdAt: now });
-      }
-      setData(prev => ({
-        ...prev,
-        clients: prev.clients.map(l => l.id === profileClient.id
-          ? { ...l, stage: profileStage, commentHistory: optimisticHistory }
-          : l
-        ),
-      }));
-      updateClientApi(profileClient.id, apiUpdates).then((serverClient) => {
-        if (!serverClient || !serverClient.id) return;
-        setData(prev => ({
-          ...prev,
-          clients: prev.clients.map(l => l.id === serverClient.id ? { ...l, ...serverClient } : l),
-        }));
-      }).catch((err) => {
+      try {
+        const serverClient = await updateClientApi(profileClient.id, apiUpdates);
+        if (serverClient?.id) {
+          setData(prev => ({
+            ...prev,
+            clients: prev.clients.map(l => l.id === serverClient.id ? { ...l, ...serverClient } : l),
+          }));
+          setProfileClient(serverClient);
+        }
+      } catch (err) {
         console.error('[saveProfile] updateClientApi failed', err);
-        showNotification('Could not save stage/comment to the server.');
-      });
+        showNotification(err?.message || 'Could not save stage/comment to the server.');
+        return;
+      }
     }
 
     showNotification(`${profileClient.firstName} ${profileClient.lastName} updated.`);
@@ -700,6 +691,26 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
     } catch (err) {
       console.error('[SuperAdminPanel] resetClientstatus failed', err);
       showNotification('Could not reset status - please try again.');
+    }
+  };
+
+  const clearClientStatusHistory = async () => {
+    if (!profileClient) return;
+    const ok = await confirm({
+      title: 'Clear Status Workflow?',
+      message: `Permanently clear the status history for "${profileClient.firstName} ${profileClient.lastName}" without changing its current status? This cannot be undone.`,
+      confirmLabel: 'Clear Workflow',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      const updated = await clearClientStatusHistoryApi(profileClient.id);
+      setProfileClient(updated);
+      setData(prev => ({ ...prev, clients: prev.clients.map(l => l.id === updated.id ? updated : l) }));
+      showNotification(`Status workflow cleared for ${updated.firstName} ${updated.lastName}.`);
+    } catch (err) {
+      console.error('[SuperAdminPanel] clearClientStatusHistory failed', err);
+      showNotification('Could not clear status workflow - please try again.');
     }
   };
 
@@ -1770,7 +1781,7 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
             {profileClient.commentHistory && profileClient.commentHistory.length > 0 && (
               <div className="crm-inline-96993e039c">
                 <div className="crm-inline-8ca294ed9c">Comment History</div>
-                {[...profileClient.commentHistory].reverse().map((entry, i) => (
+                {[...profileClient.commentHistory].map((entry, i) => (
                   <div key={i} className="crm-inline-4456df10b5">
                     <div className="crm-inline-b700c47a7c">
                       <span className="crm-inline-42de2265bb">{entry.by}</span>
@@ -1902,6 +1913,13 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
                   title="Reset stage to New and erase all status history"
                 >
                   🔄 Reset Status
+                </button>
+                <button
+                  className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-b9279831c8"
+                  onClick={clearClientStatusHistory}
+                  title="Clear workflow history without changing the current status"
+                >
+                  Clear Workflow
                 </button>
                 <button
                   className="crm-super-admin-btn crm-super-admin-btn-small crm-inline-b9279831c8"
@@ -2492,6 +2510,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
   const [clientProjectsLoading, setClientProjectsLoading] = useState(false);
   const [clientProjectsError, setClientProjectsError] = useState('');
   const [identityReviews, setIdentityReviews] = useState([]);
+  const [identityReviewClientsScanned, setIdentityReviewClientsScanned] = useState(null);
   const [identityReviewsLoading, setIdentityReviewsLoading] = useState(false);
   const [identityReviewsError, setIdentityReviewsError] = useState('');
   const reloadClientProjects = async () => {
@@ -2514,7 +2533,9 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
     setIdentityReviewsLoading(true);
     setIdentityReviewsError('');
     try {
-      setIdentityReviews(await getAdminClientIdentityReviews(status));
+      const result = await getAdminClientIdentityReviews(status);
+      setIdentityReviews(result.reviews);
+      setIdentityReviewClientsScanned(result.clientsScanned);
     } catch (error) {
       setIdentityReviewsError(error.message || 'Client identity reviews could not be loaded.');
     } finally {
@@ -2941,7 +2962,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
               <div className="crm-super-admin-card">
                 <h2 className="crm-inline-4feedf8e61">🟢 Live Sessions</h2>
                 <p className="crm-inline-7fcc53a98e">
-                  Real-time view of who is online across all offices, teams, and the client portal. Track individuals to get notified when they come online.
+                  Review staff and client portal sessions, inspect recent page activity, and terminate access when needed.
                 </p>
                 <Sessions token={getAdminToken()} />
               </div>
@@ -3883,6 +3904,7 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
             ) : activeTab === 'Identity Reviews' ? (
               <IdentityReviewsWorkspace
                 reviews={identityReviews}
+                clientsScanned={identityReviewClientsScanned}
                 loading={identityReviewsLoading}
                 error={identityReviewsError}
                 onReload={reloadIdentityReviews}

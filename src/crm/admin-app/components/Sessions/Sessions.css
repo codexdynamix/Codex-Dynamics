@@ -1,5 +1,16 @@
 @layer crm-styles {.sess-page { padding: 0 0 32px; position: relative; }
 
+.sess-load-error {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 14px; padding: 10px 12px; border: 1px solid #e74c3c55;
+  border-radius: 8px; background: #2d1a1a; color: #f2b8b5; font-size: 12px;
+}
+.crm-admin-app .sess-load-error button {
+  flex: 0 0 auto; padding: 5px 10px; border: 1px solid #e74c3c66; border-radius: 6px;
+  background: transparent; color: #f2b8b5; font-size: 12px; cursor: pointer;
+}
+.crm-admin-app .sess-load-error button:hover { background: #e74c3c22; }
+
 /* ── Toast ── */
 .sess-toast {
   position: fixed;
@@ -302,7 +313,21 @@
 .sess-pv-row:last-child { border-bottom: none; }
 .sess-pv-page { font-family: monospace; font-size: 11px; color: #A0A8B5; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess-pv-time { font-size: 11px; color: #6C7384; white-space: nowrap; }
-.sess-pv-dur  { font-size: 11px; color: var(--crm-text-secondary); white-space: nowrap; width: 60px; text-align: right; } }@layer crm-layout {
+.sess-pv-dur  { font-size: 11px; color: var(--crm-text-secondary); white-space: nowrap; width: 60px; text-align: right; }
+.sess-detail-history { margin-top: 20px; }
+.sess-detail-history h3 {
+  margin: 0 0 8px; color: var(--crm-text-secondary); font-size: 11px;
+  font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.sess-detail-history ul { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.sess-detail-history li {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid #1A1E26; color: #A0A8B5; font-size: 11px;
+}
+.sess-detail-history li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; }
+.sess-detail-history li strong { color: var(--crm-text-secondary); font-weight: 600; }
+.sess-detail-history li time { flex-shrink: 0; color: #6C7384; font-size: 10px; }
+}@layer crm-layout {
 .sess-row.selected td { background: color-mix(in srgb, var(--crm-accent) 5%, transparent); }
 .sess-table th:first-child,
 .sess-table td:first-child {

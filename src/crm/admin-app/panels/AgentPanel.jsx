@@ -14,7 +14,7 @@ import { searchAdminClients, createUserAppointment } from '../adminApi';
 import {
   getAdminMessages, sendAdminMessage, markAdminMessagesRead, getAdminUnreadMessageCounts,
   deleteAdminMessage, clearAdminChat, adminSetClientPassword, getClientPortalPasswordAdmin,
-  deleteClientCommentApi, deleteClientstatusEntryApi, getClientNotificationsAsAdmin,
+  deleteClientCommentApi, deleteClientstatusEntryApi, clearClientCommentsApi, clearClientStatusHistoryApi, getClientNotificationsAsAdmin,
   postAdminPresence, getAdminMessageAttachmentUrl, getStaffCapabilities, fetchAdminMe,
   updateClientApi, getClientProfilePermissionsAdmin,
 } from '../adminApi';
@@ -609,6 +609,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
   const canReadAccountingSection = isSuperAdmin || ['read', 'edit'].includes(profileSectionPermissions.accounting);
   const canEditAccountingSection = isSuperAdmin || profileSectionPermissions.accounting === 'edit';
   const [status, setStatus] = useState(normalizeStage(client?.stage || 'New'));
+  const [statusSaving, setStatusSaving] = useState(false);
   const [comment, setComment] = useState(client?.comment || '');
   const [passwordInput, setPasswordInput] = useState('');
   const [chatInput, setChatInput] = useState('');
@@ -901,18 +902,61 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
   const nextClient = visibleClients[currentIndex + 1] || null;
 
   const handleStatusChange = (newStatus) => {
-    if (newStatus === status) return;
     setStatus(newStatus);
-    updateClient(client.id, { stage: newStatus, lastCommentDate: new Date().toISOString().slice(0, 10) });
-    showNotification(`Client status updated to ${newStatus}.`);
+  };
+
+  const handleSaveStatus = async () => {
+    if (status === client.stage || statusSaving) {
+      if (status === client.stage) showNotification('Status unchanged.');
+      return;
+    }
+    setStatusSaving(true);
+    try {
+      const savedClient = await updateClient(client.id, {
+        stage: status,
+        _actorName: actorName,
+        _actorId: currentUser?.id,
+      });
+      if (savedClient) showNotification('Status saved to workflow.');
+    } finally {
+      setStatusSaving(false);
+    }
   };
 
   const actorName = currentUser?.name || 'Unknown';
-  const handclientdComment = () => {
+  const handclientdComment = async () => {
     if (!comment.trim()) return;
-    updateClient(client.id, { comment: comment.trim(), lastCommentDate: new Date().toISOString().slice(0, 10), _actorName: actorName, _actorId: currentUser?.id });
+    const savedClient = await updateClient(client.id, {
+      comment: comment.trim(),
+      lastCommentDate: new Date().toISOString().slice(0, 10),
+      _actorName: actorName,
+      _actorId: currentUser?.id,
+    });
+    if (!savedClient) return;
     showNotification('Comment posted successfully.');
     setComment('');
+  };
+
+  const handleClearComments = async () => {
+    if (!isSuperAdmin || !commentHistory.length) return;
+    const ok = await confirm({
+      title: 'Clear comment history?',
+      message: 'Permanently delete all comments from this client profile? This cannot be undone.',
+      confirmLabel: 'Clear Comments',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      const updated = await clearClientCommentsApi(client.id);
+      setData((previous) => ({
+        ...previous,
+        clients: previous.clients.map((item) => item.id === client.id ? updated : item),
+      }));
+      showNotification('Comment history cleared.');
+    } catch (error) {
+      console.error('[AgentPanel] clearComments failed', error);
+      showNotification(error?.message || 'Failed to clear comments.');
+    }
   };
 
   const handleDeleteComment = async (commentId) => {
@@ -927,7 +971,10 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
     try {
       const updated = await deleteClientCommentApi(client.id, commentId);
       if (updated && updated.id) {
-        updateClient(client.id, { commentHistory: updated.commentHistory, statusHistory: updated.statusHistory, _actorName: actorName, _actorId: currentUser?.id });
+        setData((previous) => ({
+          ...previous,
+          clients: previous.clients.map((item) => item.id === client.id ? updated : item),
+        }));
       }
       showNotification('Comment removed.');
     } catch (err) {
@@ -950,11 +997,36 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
     try {
       const serverClient = await deleteClientstatusEntryApi(client.id, entry.id);
       if (serverClient?.id) {
-        updateClient(client.id, { ...serverClient, _actorName: actorName, _actorId: currentUser?.id });
+        setData((previous) => ({
+          ...previous,
+          clients: previous.clients.map((item) => item.id === client.id ? serverClient : item),
+        }));
       }
       showNotification('Status entry removed.');
     } catch {
       showNotification('Failed to delete status entry - please try again.');
+    }
+  };
+
+  const handleClearStatusHistory = async () => {
+    if (!isSuperAdmin || !statusHistory.length) return;
+    const ok = await confirm({
+      title: 'Clear status workflow?',
+      message: 'Permanently clear the status-change history without changing the client’s current status? This cannot be undone.',
+      confirmLabel: 'Clear Workflow',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      const updated = await clearClientStatusHistoryApi(client.id);
+      setData((previous) => ({
+        ...previous,
+        clients: previous.clients.map((item) => item.id === client.id ? updated : item),
+      }));
+      showNotification('Status workflow cleared.');
+    } catch (error) {
+      console.error('[AgentPanel] clearStatusHistory failed', error);
+      showNotification(error?.message || 'Failed to clear status workflow.');
     }
   };
 
@@ -996,8 +1068,10 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
 
   const commentHistory = (client.commentHistory || []).filter(
     (c) => c && c.text && !/^assigned to\b/i.test(String(c.text).trim())
+  ).sort((a, b) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
+  const statusHistory = [...(client.statusHistory || [])].sort(
+    (a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime()
   );
-  const statusHistory = client.statusHistory || [];
   const assignedByDisplay = (client.assignedBy || '').split('→').pop().trim() || '-';
 
   return (
@@ -1143,16 +1217,9 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
             <button
               type="button"
               className="crm-post-comment-btn crm-inline-e86517ef95"
-
-              onClick={() => {
-                if (status === client.stage) {
-                  showNotification('Status unchanged.');
-                  return;
-                }
-                updateClient(client.id, { stage: status, _actorName: actorName, _actorId: currentUser?.id });
-                showNotification('Status saved to workflow.');
-              }}
-            >Save Status</button>
+              onClick={handleSaveStatus}
+              disabled={statusSaving}
+            >{statusSaving ? 'Saving...' : 'Save Status'}</button>
           </div>
           <div className="crm-detail-row"><span className="crm-label">Office / Team</span><span className="crm-value">{getOfficeName(client.assignedToOffice, data.offices)} · {getTeamName(client.assignedToTeam, data.teams)}</span></div>
           <div className="crm-detail-row">
@@ -1283,18 +1350,23 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
           </div>
 
           <div className="crm-comment-history-card">
-            <h3>Comment History</h3>
+            <div className="crm-profile-history-header">
+              <h3>Comment History</h3>
+              {isSuperAdmin && commentHistory.length > 0 && (
+                <button type="button" className="crm-history-clear-btn" onClick={handleClearComments}>Clear comments</button>
+              )}
+            </div>
             {commentHistory.length === 0 ? (
               <p>No comments yet. Please add client interaction notes.</p>
             ) : (
               <div className="crm-comment-history-container">
                 <ul className="crm-comment-history-list">
                   {commentHistory.map((entry, idx) => (
-                    <li key={entry.date + '-' + idx} className="crm-comment-history-item">
+                    <li key={entry.id || `${entry.createdAt || entry.date}-${idx}`} className="crm-comment-history-item">
                       <div className="crm-comment-meta">
                         <span className="crm-comment-author">{entry.by || 'Unknown'}</span>
                         <span className="crm-comment-date">
-                          {entry.date}
+                          <span>{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : entry.date}</span>
                           {isSuperAdmin && (
                             <button
                               type="button"
@@ -1316,14 +1388,19 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
 
         <div className="crm-status-workflow-column">
           <div className="crm-status-workflow-card">
-            <h3>Status Workflow</h3>
+            <div className="crm-profile-history-header">
+              <h3>Status Workflow</h3>
+              {isSuperAdmin && statusHistory.length > 0 && (
+                <button type="button" className="crm-history-clear-btn" onClick={handleClearStatusHistory}>Clear workflow</button>
+              )}
+            </div>
             <div className="crm-status-timeline">
               {statusHistory.length === 0 ? (
                 <div className="crm-status-timeline-empty">No status changes recorded yet. Update the status to start tracking the workflow.</div>
               ) : (
                 statusHistory.map((entry, idx) => {
                   return (
-                    <div key={idx} className="crm-status-timeline-row">
+                    <div key={entry.id || idx} className="crm-status-timeline-row">
                       <div className="crm-status-timeline-arrow">
                         <span className="crm-status-pill crm-inline-80bcfb521b"  style={{color: stageColor(entry.from), border: `1px solid ${stageColor(entry.from)}`}}>{entry.from}</span>
                         <span className="crm-status-pill-arrow">→</span>
