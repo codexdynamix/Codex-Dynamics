@@ -443,6 +443,10 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
 
       // Branding
       activeTheme: localCfg.theme?.activeTheme || DEFAULT_SITE_THEME_PRESET.id,
+      siteMode: localCfg.theme?.siteMode
+        || (localCfg.colors?.background
+          ? isDarkColor(localCfg.colors.background) ? 'dark' : 'light'
+          : 'dark'),
       primaryColor: localCfg.colors?.primary || DEFAULT_SITE_THEME_PRESET.primary,
       secondaryColor: localCfg.colors?.secondary || DEFAULT_SITE_THEME_PRESET.secondary,
       accentColor: localCfg.colors?.accent || DEFAULT_SITE_THEME_PRESET.accent,
@@ -551,6 +555,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
           heroSubtitle: storedConfig.hero?.subtitle ?? previous.heroSubtitle,
           heroBadge: storedConfig.hero?.badge ?? previous.heroBadge,
           activeTheme: storedConfig.theme?.activeTheme ?? previous.activeTheme,
+          siteMode: storedConfig.theme?.siteMode ?? previous.siteMode,
           primaryColor: storedConfig.colors?.primary ?? previous.primaryColor,
           secondaryColor: storedConfig.colors?.secondary ?? previous.secondaryColor,
           accentColor: storedConfig.colors?.accent ?? previous.accentColor,
@@ -681,6 +686,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
       },
       theme: {
         activeTheme: configToSync.activeTheme || 'codex-pro',
+        siteMode: configToSync.siteMode || 'dark',
         borderRadius: configToSync.borderRadius,
         fontFamily: configToSync.fontFamily,
         headerStyle: configToSync.headerStyle,
@@ -767,6 +773,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
     setSiteConfig((prev) => ({
       ...prev,
       activeTheme: preset.id,
+      siteMode: isDarkColor(preset.bg) ? 'dark' : 'light',
       primaryColor: preset.primary,
       secondaryColor: preset.secondary || preset.card,
       accentColor: preset.accent,
@@ -787,6 +794,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
   const handleApplyPalette = (palette) => {
     setSiteConfig((prev) => ({
       ...prev,
+      siteMode: isDarkColor(palette.bg) ? 'dark' : 'light',
       primaryColor: palette.primary,
       secondaryColor: palette.secondary || palette.card,
       accentColor: palette.accent,
@@ -906,9 +914,11 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
 
   // Preset picker
   const handleApplyPreset = (preset) => {
+    const siteMode = isDarkColor(preset.bg) ? 'dark' : 'light';
     setSiteConfig(prev => ({
       ...prev,
       activeTheme: preset.id,
+      siteMode,
       primaryColor: preset.primary,
       secondaryColor: preset.secondary,
       accentColor: preset.accent,
@@ -917,6 +927,33 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
     }));
     setHasUnsavedChanges(true);
     showNotification(`Applied palette: ${preset.name}`);
+  };
+
+  const handleSetSiteMode = (siteMode) => {
+    const palette = siteMode === 'dark'
+      ? DEFAULT_SITE_THEME_PRESET
+      : {
+          id: 'titanium-light',
+          name: 'Titanium Apple Light',
+          primary: '#0071E3',
+          secondary: '#F2F2F7',
+          accent: '#0071E3',
+          bg: '#F5F5F7',
+          card: '#FFFFFF',
+        };
+    setSiteConfig((previous) => ({
+      ...previous,
+      siteMode,
+      activeTheme: palette.id,
+      primaryColor: palette.primary,
+      secondaryColor: palette.secondary,
+      accentColor: palette.accent,
+      backgroundColor: palette.bg,
+      cardBg: palette.card,
+      cardStyle: 'bordered',
+    }));
+    setHasUnsavedChanges(true);
+    showNotification(`Main site set to ${siteMode === 'dark' ? 'dark' : 'light'} mode. Save All Changes to publish.`);
   };
 
   // Section order & visibility
@@ -1311,6 +1348,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
         },
         theme: {
           activeTheme: siteConfig.activeTheme || 'codex-pro',
+          siteMode: siteConfig.siteMode || 'dark',
           borderRadius: siteConfig.borderRadius,
           fontFamily: siteConfig.fontFamily,
           headerStyle: siteConfig.headerStyle,
@@ -1389,6 +1427,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
       heroSubtitle: 'High-performance websites, custom CRM software, and digital marketing engines.',
       heroBadge: 'Codex Dynamics',
       activeTheme: DEFAULT_SITE_THEME_PRESET.id,
+      siteMode: 'dark',
       primaryColor: DEFAULT_SITE_THEME_PRESET.primary,
       secondaryColor: DEFAULT_SITE_THEME_PRESET.secondary,
       accentColor: DEFAULT_SITE_THEME_PRESET.accent,
@@ -2179,50 +2218,32 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
                             <Palette size={15} color="var(--crm-accent)" /> Global Theme Mode
                           </div>
                           <div className="crm-inline-3c5edc879d">
-                            Instant switch between Apple Light and Luxury Dark aesthetic.
+                            Set the public website appearance. Changes preview immediately and apply after saving.
                           </div>
                         </div>
                         <span className="crm-status-pill saved crm-inline-02e34fa5f5" >
-                          {isDarkColor(siteConfig.backgroundColor) ? '🌙 Dark Active' : '☀️ Light Active'}
+                          {siteConfig.siteMode === 'dark' ? '🌙 Dark Active' : '☀️ Light Active'}
                         </span>
                       </div>
 
                       <div className="crm-inline-40a42955be">
                         <button
                           type="button"
-                          onClick={() => {
-                            handleApplyPreset({
-                              id: 'titanium-light',
-                              name: 'Titanium Apple Light',
-                              primary: '#0071E3',
-                              secondary: '#F2F2F7',
-                              accent: '#0071E3',
-                              bg: '#F5F5F7',
-                              card: '#FFFFFF'
-                            });
-                          }}
-                          className={`crm-ios-mode-btn ${!isDarkColor(siteConfig.backgroundColor) ? 'active' : ''}`}
+                          onClick={() => handleSetSiteMode('light')}
+                          className={`crm-ios-mode-btn ${siteConfig.siteMode === 'light' ? 'active' : ''}`}
+                          aria-pressed={siteConfig.siteMode === 'light'}
                         >
-                          <Sun size={14} color={!isDarkColor(siteConfig.backgroundColor) ? 'var(--crm-accent)' : '#8E8E93'} />
-                          <span>Apple Light</span>
+                          <Sun size={14} color={siteConfig.siteMode === 'light' ? 'var(--crm-accent)' : '#8E8E93'} />
+                          <span>Light Mode</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            handleApplyPreset({
-                              id: 'codex-gold',
-                              name: 'Codex Gold (Dark)',
-                              primary: 'var(--crm-accent)',
-                              secondary: '#1E2329',
-                              accent: 'var(--crm-accent)',
-                              bg: '#0F1216',
-                              card: '#181A20'
-                            });
-                          }}
-                          className={`crm-ios-mode-btn ${isDarkColor(siteConfig.backgroundColor) ? 'active' : ''}`}
+                          onClick={() => handleSetSiteMode('dark')}
+                          className={`crm-ios-mode-btn ${siteConfig.siteMode === 'dark' ? 'active' : ''}`}
+                          aria-pressed={siteConfig.siteMode === 'dark'}
                         >
-                          <Moon size={14} color={isDarkColor(siteConfig.backgroundColor) ? 'var(--crm-accent)' : '#8E8E93'} />
-                          <span>Luxury Dark</span>
+                          <Moon size={14} color={siteConfig.siteMode === 'dark' ? 'var(--crm-accent)' : '#8E8E93'} />
+                          <span>Dark Mode</span>
                         </button>
                       </div>
                     </div>

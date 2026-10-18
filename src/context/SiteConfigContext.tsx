@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from "react";
 import { DEFAULT_SITE_CONFIG, type SiteConfig, type SocialContact, type AddressItem } from "@/types/site-editor";
+import { useTheme } from "@/context/ThemeContext";
+import { isDarkHex } from "@/lib/theme-engine";
 
 interface SiteConfigContextType {
   config: SiteConfig;
@@ -54,6 +56,10 @@ function safeMergeConfig(base: SiteConfig, override: Partial<SiteConfig>): SiteC
     theme: {
       ...base.theme,
       ...(override.theme || {}),
+      siteMode: override.theme?.siteMode ||
+        (override.colors?.background
+          ? isDarkHex(override.colors.background) ? "dark" : "light"
+          : base.theme?.siteMode),
       layout: {
         ...base.theme?.layout,
         ...(override.theme?.layout || {}),
@@ -115,6 +121,7 @@ const SiteConfigContext = createContext<SiteConfigContextType | null>(null);
 export function SiteConfigProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
   const [isLoading, setIsLoading] = useState(false);
+  const { setTheme } = useTheme();
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -159,6 +166,14 @@ export function SiteConfigProvider({ children }: { children: React.ReactNode }) 
       setIsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const pathname = typeof window === "undefined" ? "" : window.location.pathname;
+    if (pathname.startsWith("/admin") || pathname.startsWith("/portal") || pathname.startsWith("/client")) return;
+    if (config.theme?.siteMode === "light" || config.theme?.siteMode === "dark") {
+      setTheme(config.theme.siteMode);
+    }
+  }, [config.theme?.siteMode, setTheme]);
 
   useEffect(() => {
     fetchConfig();

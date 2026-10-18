@@ -271,6 +271,7 @@ export type ConfigSnapshot = SnapshotItem;
 
 export interface ThemeSettings {
   activeTheme: string;
+  siteMode?: "light" | "dark";
   preset?: string;
   fontFamily: "system" | "inter" | "playfair" | "syne" | string;
   containerWidth: "1200px" | "1280px" | "1440px" | "full";
@@ -802,6 +803,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
 
   theme: {
     activeTheme: "codex-pro",
+    siteMode: "dark",
     preset: "default",
     fontFamily: "system",
     containerWidth: "1280px",
