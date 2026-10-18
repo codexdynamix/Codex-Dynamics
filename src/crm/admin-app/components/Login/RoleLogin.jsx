@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ROLE } from '../../shared';
-import { adminLogin, mapAdminToUser, fetchAdminMe } from '../../adminApi';
+import {
+  adminLogin,
+  completeSuperAdminPasswordReset,
+  fetchAdminMe,
+  mapAdminToUser,
+  requestSuperAdminPasswordReset,
+} from '../../adminApi';
 
 const ROLE_PATH = {
   [ROLE.SUPER_ADMIN]:    'super-admin',
@@ -47,6 +53,13 @@ const RoleLogin = ({ role, onAdminLogin }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [error,        setError]        = useState('');
   const [loading,      setLoading]      = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [recoveryError, setRecoveryError] = useState('');
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
 
   useEffect(() => {
     fetchAdminMe()
@@ -78,6 +91,50 @@ const RoleLogin = ({ role, onAdminLogin }) => {
       setError(err.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRequestPasswordReset = async () => {
+    setRecoveryError('');
+    setRecoveryMessage('');
+    setRecoveryLoading(true);
+    try {
+      await requestSuperAdminPasswordReset();
+      setRecoveryMode(true);
+      setRecoveryMessage('A reset code has been sent to codexdynamix@gmail.com. It expires in 10 minutes.');
+    } catch (requestError) {
+      setRecoveryError(requestError.message || 'Could not send the reset code. Please try again.');
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  const handleCompletePasswordReset = async (event) => {
+    event.preventDefault();
+    setRecoveryError('');
+    setRecoveryMessage('');
+    if (newPassword !== confirmPassword) {
+      setRecoveryError('The new passwords do not match.');
+      return;
+    }
+    if (newPassword.length < 12) {
+      setRecoveryError('Use a password with at least 12 characters.');
+      return;
+    }
+
+    setRecoveryLoading(true);
+    try {
+      await completeSuperAdminPasswordReset(recoveryCode.trim(), newPassword);
+      setPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setRecoveryCode('');
+      setRecoveryMode(false);
+      setRecoveryMessage('Your password has been reset. Sign in with your new password.');
+    } catch (requestError) {
+      setRecoveryError(requestError.message || 'Could not reset the password. Please try again.');
+    } finally {
+      setRecoveryLoading(false);
     }
   };
 
@@ -121,7 +178,7 @@ const RoleLogin = ({ role, onAdminLogin }) => {
           </div>
 
           {/* Error Banner */}
-          {error && (
+          {!recoveryMode && error && (
             <div className="crm-inline-a8b1c4036c">
               <span className="crm-inline-3d555f179c">⚠️</span>
               <span className="crm-inline-84a68f2fcc">
@@ -129,9 +186,20 @@ const RoleLogin = ({ role, onAdminLogin }) => {
               </span>
             </div>
           )}
+          {recoveryError && (
+            <div className="crm-inline-a8b1c4036c" role="alert">
+              <span className="crm-inline-3d555f179c">⚠️</span>
+              <span className="crm-inline-84a68f2fcc">{recoveryError}</span>
+            </div>
+          )}
+          {recoveryMessage && (
+            <div className="crm-role-login-recovery-message" role="status">
+              {recoveryMessage}
+            </div>
+          )}
 
           {/* Form */}
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} hidden={recoveryMode}>
             <div className="crm-inline-cff169011b">
               {/* Email row */}
               <div className="crm-inline-f7067d88d9">
@@ -206,7 +274,67 @@ const RoleLogin = ({ role, onAdminLogin }) => {
             </button>
           </form>
 
-          <p className="crm-inline-7a55846ad7">
+          {role === ROLE.SUPER_ADMIN && !recoveryMode && (
+            <button
+              type="button"
+              className="crm-role-login-recovery-link"
+              disabled={recoveryLoading}
+              onClick={handleRequestPasswordReset}
+            >
+              {recoveryLoading ? 'Sending reset code…' : 'Forgot password?'}
+            </button>
+          )}
+
+          {recoveryMode && (
+            <form className="crm-role-login-recovery-form" onSubmit={handleCompletePasswordReset}>
+              <label className="crm-inline-e86365d9a2" htmlFor="super-admin-reset-code">8-digit reset code</label>
+              <input
+                id="super-admin-reset-code"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{8}"
+                maxLength={8}
+                autoComplete="one-time-code"
+                required
+                value={recoveryCode}
+                onChange={(event) => setRecoveryCode(event.target.value.replace(/\D/g, '').slice(0, 8))}
+                className="crm-role-login-recovery-input"
+                placeholder="Enter code from Gmail"
+              />
+              <label className="crm-inline-e86365d9a2" htmlFor="super-admin-new-password">New password</label>
+              <input
+                id="super-admin-new-password"
+                type="password"
+                autoComplete="new-password"
+                minLength={12}
+                required
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                className="crm-role-login-recovery-input"
+                placeholder="At least 12 characters"
+              />
+              <label className="crm-inline-e86365d9a2" htmlFor="super-admin-confirm-password">Confirm new password</label>
+              <input
+                id="super-admin-confirm-password"
+                type="password"
+                autoComplete="new-password"
+                minLength={12}
+                required
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                className="crm-role-login-recovery-input"
+                placeholder="Enter the new password again"
+              />
+              <button type="submit" disabled={recoveryLoading || recoveryCode.length !== 8} className="crm-inline-16f7250a81 crm-role-login-submit">
+                {recoveryLoading ? 'Resetting password…' : 'Reset Super Admin password'}
+              </button>
+              <button type="button" className="crm-role-login-recovery-link" onClick={() => { setRecoveryMode(false); setRecoveryError(''); setRecoveryMessage(''); }}>
+                Back to sign in
+              </button>
+            </form>
+          )}
+
+          <p className="crm-inline-7a55846ad7" hidden={recoveryMode}>
             Sign in with the email address and password assigned to your staff account.
           </p>
         </div>

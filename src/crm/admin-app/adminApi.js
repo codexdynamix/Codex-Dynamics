@@ -117,6 +117,21 @@ export async function adminLogin(email, password, requestedRole) {
   return data.user;
 }
 
+export async function requestSuperAdminPasswordReset() {
+  return adminFetch('/api/admin/password-reset/request', {
+    method: 'POST',
+    body: {},
+    timeoutMs: 45000,
+  });
+}
+
+export async function completeSuperAdminPasswordReset(code, password) {
+  return adminFetch('/api/admin/password-reset/complete', {
+    method: 'POST',
+    body: { code, password },
+  });
+}
+
 /**
  * POST /api/admin/logout
  * Best-effort: tells the backend to clear its admin cookie pair, then wipes

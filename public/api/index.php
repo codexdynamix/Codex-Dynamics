@@ -564,7 +564,9 @@ if ($path === '/admin/login' && $method === 'POST') {
     if (!$staff) {
         jsonOut(['ok' => false, 'error' => 'Staff account not found in MongoDB.'], 401);
     }
-    $expectedPassword = $email === $adminEmail ? $adminPassword : (string)($staff['password'] ?? '');
+    $expectedPassword = $email === $adminEmail
+        ? (!empty($staff['password_updated_at']) ? (string)($staff['password'] ?? '') : $adminPassword)
+        : (string)($staff['password'] ?? '');
     if ($expectedPassword === '' || !hash_equals($expectedPassword, $password)) {
         jsonOut(['ok' => false, 'error' => 'Invalid staff email or password.'], 401);
     }
@@ -575,6 +577,136 @@ if ($path === '/admin/login' && $method === 'POST') {
         'token' => $token,
         'user' => $staff,
     ]);
+}
+
+if ($path === '/admin/password-reset/request' && $method === 'POST') {
+    $now = time();
+    $resetId = 'super-admin';
+    $reset = MongoService::findOne('admin_password_reset_tokens', ['id' => $resetId]);
+    $requestTimes = array_values(array_filter(
+        is_array($reset['request_times'] ?? null) ? $reset['request_times'] : [],
+        static fn($timestamp): bool => is_numeric($timestamp) && (int)$timestamp > $now - 3600
+    ));
+    if (isset($reset['last_sent_at']) && $now - (int)$reset['last_sent_at'] < 60) {
+        jsonOut(['ok' => false, 'error' => 'Wait a minute before requesting another reset code.'], 429);
+    }
+    if (count($requestTimes) >= 5) {
+        jsonOut(['ok' => false, 'error' => 'Too many reset requests. Try again in an hour.'], 429);
+    }
+
+    $adminEmail = strtolower(trim((string)($config['admin_email'] ?? 'admin@codexdynamics.com')));
+    $staff = MongoService::findOne('staff_users', ['email' => $adminEmail]);
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? 'superadmin')) ?? ''));
+    if (($staff !== null && $role !== 'superadmin')
+        || ($staff['status'] ?? '') === 'Suspended'
+        || !empty($staff['deleted_at']) || ($staff['is_bin'] ?? false) === true) {
+        jsonOut(['ok' => true, 'message' => 'If the Super Admin account is available, a reset code has been sent.']);
+    }
+
+    $integration = hostingerMailIntegration();
+    $token = trim((string)($integration['token'] ?? ''));
+    if ($token === '') {
+        jsonOut(['ok' => false, 'error' => 'Password recovery email is not configured.'], 503);
+    }
+    $mailboxes = hostingerMailMailboxList($integration);
+    $sender = null;
+    foreach ($mailboxes as $mailbox) {
+        $address = strtolower(trim((string)($mailbox['address'] ?? $mailbox['email'] ?? $mailbox['emailAddress'] ?? '')));
+        if ($address === 'support@codexdynamics.com') {
+            $sender = $mailbox;
+            break;
+        }
+        if ($sender === null) $sender = $mailbox;
+    }
+    $resourceId = trim((string)($sender['resourceId'] ?? $sender['id'] ?? $sender['mailboxId'] ?? ''));
+    if ($resourceId === '') {
+        jsonOut(['ok' => false, 'error' => 'No sender mailbox is available for password recovery.'], 503);
+    }
+    if ($mongoUri === '') {
+        jsonOut(['ok' => false, 'error' => 'Password recovery is unavailable.'], 503);
+    }
+
+    $code = (string)random_int(10000000, 99999999);
+    $record = [
+        'id' => $resetId,
+        'code_hash' => hash_hmac('sha256', $code, $mongoUri),
+        'expires_at' => $now + 600,
+        'attempts' => 0,
+        'active' => false,
+        'last_sent_at' => $now,
+        'request_times' => array_merge($requestTimes, [$now]),
+    ];
+    if ($reset === null) MongoService::insert('admin_password_reset_tokens', $record);
+    else MongoService::updateOne('admin_password_reset_tokens', ['id' => $resetId], $record);
+
+    hostingerMailApiRequestMethod(
+        $token,
+        '/api/v1/mailboxes/' . rawurlencode($resourceId) . '/send',
+        'POST',
+        [
+            'to' => ['codexdynamix@gmail.com'],
+            'subject' => 'Codex Dynamics Super Admin password reset',
+            'text' => "Your Super Admin password reset code is {$code}. It expires in 10 minutes. If you did not request this reset, ignore this email.",
+        ]
+    );
+    MongoService::updateOne('admin_password_reset_tokens', ['id' => $resetId], ['active' => true]);
+    jsonOut(['ok' => true, 'message' => 'If the Super Admin account is available, a reset code has been sent.']);
+}
+
+if ($path === '/admin/password-reset/complete' && $method === 'POST') {
+    $code = trim((string)($body['code'] ?? ''));
+    $password = (string)($body['password'] ?? '');
+    if (!preg_match('/^\d{8}$/', $code)) {
+        jsonOut(['ok' => false, 'error' => 'Enter the 8-digit reset code from the recovery email.'], 422);
+    }
+    if (strlen($password) < 12 || strlen($password) > 128) {
+        jsonOut(['ok' => false, 'error' => 'The new password must be between 12 and 128 characters.'], 422);
+    }
+
+    $resetId = 'super-admin';
+    $challenge = MongoService::findOne('admin_password_reset_tokens', ['id' => $resetId]);
+    if ($challenge === null || ($challenge['active'] ?? false) !== true
+        || (int)($challenge['expires_at'] ?? 0) < time()) {
+        jsonOut(['ok' => false, 'error' => 'The reset code is invalid or expired. Request a new code.'], 400);
+    }
+    if ((int)($challenge['attempts'] ?? 0) >= 5) {
+        jsonOut(['ok' => false, 'error' => 'Too many incorrect codes. Request a new reset code.'], 429);
+    }
+    $providedHash = hash_hmac('sha256', $code, $mongoUri);
+    if (!hash_equals((string)($challenge['code_hash'] ?? ''), $providedHash)) {
+        MongoService::updateOne('admin_password_reset_tokens', ['id' => $resetId], [
+            'attempts' => (int)($challenge['attempts'] ?? 0) + 1,
+        ]);
+        jsonOut(['ok' => false, 'error' => 'The reset code is invalid or expired.'], 400);
+    }
+
+    $adminEmail = strtolower(trim((string)($config['admin_email'] ?? 'admin@codexdynamics.com')));
+    $staff = MongoService::findOne('staff_users', ['email' => $adminEmail]);
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+    if ($staff !== null && $role !== 'superadmin') {
+        MongoService::deleteOne('admin_password_reset_tokens', ['id' => $resetId]);
+        jsonOut(['ok' => false, 'error' => 'The Super Admin account is unavailable.'], 400);
+    }
+    $staffId = (string)($staff['id'] ?? 'staff_super_admin');
+    if ($staff === null) {
+        MongoService::insert('staff_users', [
+            'id' => $staffId,
+            'email' => $adminEmail,
+            'name' => 'Codex Super Admin',
+            'role' => 'super-admin',
+            'status' => 'Active',
+            'capabilities' => '["all"]',
+            'password' => $password,
+            'password_updated_at' => date('c'),
+        ]);
+    } else {
+        MongoService::updateOne('staff_users', ['id' => $staffId], [
+            'password' => $password,
+            'password_updated_at' => date('c'),
+        ]);
+    }
+    MongoService::deleteOne('admin_password_reset_tokens', ['id' => $resetId]);
+    jsonOut(['ok' => true, 'message' => 'Super Admin password reset successfully.']);
 }
 
 if ($path === '/admin/me') {

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getMongoCollection, isMongoConnected, getDatabaseName } from './mongo.ts';
@@ -1560,6 +1560,149 @@ apiRouter.get('/admin/hostinger/overview', async (req: Request, res: Response) =
     domain: providerMailboxes[0]?.address.split('@')[1] || '',
     quota: null,
   });
+});
+
+const SUPER_ADMIN_RECOVERY_EMAIL = 'codexdynamix@gmail.com';
+const SUPER_ADMIN_RESET_ID = 'super-admin';
+const RESET_CODE_TTL_MS = 10 * 60 * 1000;
+
+function hashSuperAdminResetCode(code: string): string {
+  const secret = process.env.MONGODB_URI;
+  if (!secret) throw Object.assign(new Error('Password recovery is unavailable.'), { status: 503 });
+  return createHmac('sha256', secret).update(code).digest('hex');
+}
+
+async function sendSuperAdminResetCode(code: string): Promise<void> {
+  const snapshot = await hostingerMailboxSnapshot();
+  if (snapshot.providerError) throw Object.assign(new Error(snapshot.providerError), { status: 502 });
+  if (!snapshot.integration?.token) {
+    throw Object.assign(new Error('Password recovery email is not configured.'), { status: 503 });
+  }
+  const mailbox = snapshot.mailboxes.find(item => item.address.toLowerCase() === 'support@codexdynamics.com')
+    || snapshot.mailboxes[0];
+  if (!mailbox?.resourceId) {
+    throw Object.assign(new Error('No sender mailbox is available for password recovery.'), { status: 503 });
+  }
+  const response = await fetch(
+    `https://api.mail.hostinger.com/api/v1/mailboxes/${encodeURIComponent(mailbox.resourceId)}/send`,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${snapshot.integration.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: [SUPER_ADMIN_RECOVERY_EMAIL],
+        subject: 'Codex Dynamics Super Admin password reset',
+        text: `Your Super Admin password reset code is ${code}. It expires in 10 minutes. If you did not request this reset, ignore this email.`,
+      }),
+      signal: AbortSignal.timeout(20000),
+    }
+  );
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = response.status === 401 || response.status === 403
+      ? 'The configured email provider rejected its credentials.'
+      : payload?.error || payload?.message || `The recovery email could not be sent (HTTP ${response.status}).`;
+    throw Object.assign(new Error(message), { status: 502 });
+  }
+}
+
+apiRouter.post('/admin/password-reset/request', async (req: Request, res: Response) => {
+  const resetCollection = getMongoCollection('admin_password_reset_tokens');
+  const existing = await resetCollection.findOne({ id: SUPER_ADMIN_RESET_ID });
+  const now = Date.now();
+  const recentRequests = (Array.isArray(existing?.request_times) ? existing.request_times : [])
+    .filter((timestamp: number) => Number.isFinite(timestamp) && timestamp > now - 60 * 60 * 1000);
+  if (existing?.last_sent_at && now - Number(existing.last_sent_at) < 60 * 1000) {
+    return res.status(429).json({ ok: false, error: 'Wait a minute before requesting another reset code.' });
+  }
+  if (recentRequests.length >= 5) {
+    return res.status(429).json({ ok: false, error: 'Too many reset requests. Try again in an hour.' });
+  }
+
+  const staff = await getMongoCollection('staff_users').findOne({
+    email: { $regex: '^admin@codexdynamics\\.com$', $options: 'i' },
+  });
+  if (!staff || normalizeAdminRole(staff.role) !== 'Super Admin'
+    || staff.status === 'Suspended' || staff.is_bin === true || staff.deleted_at) {
+    return res.json({ ok: true, message: 'If the Super Admin account is available, a reset code has been sent.' });
+  }
+
+  const code = String(randomInt(10_000_000, 100_000_000));
+  const record = {
+    id: SUPER_ADMIN_RESET_ID,
+    code_hash: hashSuperAdminResetCode(code),
+    expires_at: now + RESET_CODE_TTL_MS,
+    attempts: 0,
+    active: false,
+    last_sent_at: now,
+    request_times: [...recentRequests, now],
+  };
+  await resetCollection.updateOne({ id: SUPER_ADMIN_RESET_ID }, { $set: record }, { upsert: true });
+
+  try {
+    await sendSuperAdminResetCode(code);
+  } catch (error: any) {
+    const status = Number(error?.status) || 502;
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || 'The reset email could not be sent. Please try again later.',
+    });
+  }
+
+  await resetCollection.updateOne(
+    { id: SUPER_ADMIN_RESET_ID },
+    { $set: { active: true } }
+  );
+  return res.json({ ok: true, message: 'If the Super Admin account is available, a reset code has been sent.' });
+});
+
+apiRouter.post('/admin/password-reset/complete', async (req: Request, res: Response) => {
+  const code = String(req.body?.code || '').trim();
+  const password = String(req.body?.password || '');
+  if (!/^\d{8}$/.test(code)) {
+    return res.status(422).json({ ok: false, error: 'Enter the 8-digit reset code from the recovery email.' });
+  }
+  if (password.length < 12 || password.length > 128) {
+    return res.status(422).json({ ok: false, error: 'The new password must be between 12 and 128 characters.' });
+  }
+
+  const resetCollection = getMongoCollection('admin_password_reset_tokens');
+  const challenge = await resetCollection.findOne({ id: SUPER_ADMIN_RESET_ID });
+  const now = Date.now();
+  if (!challenge?.active || Number(challenge.expires_at) < now) {
+    return res.status(400).json({ ok: false, error: 'The reset code is invalid or expired. Request a new code.' });
+  }
+  if (Number(challenge.attempts) >= 5) {
+    return res.status(429).json({ ok: false, error: 'Too many incorrect codes. Request a new reset code.' });
+  }
+
+  const expected = Buffer.from(String(challenge.code_hash || ''), 'hex');
+  const actual = Buffer.from(hashSuperAdminResetCode(code), 'hex');
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+    await resetCollection.updateOne(
+      { id: SUPER_ADMIN_RESET_ID },
+      { $set: { attempts: Number(challenge.attempts || 0) + 1 } }
+    );
+    return res.status(400).json({ ok: false, error: 'The reset code is invalid or expired.' });
+  }
+
+  const staffCollection = getMongoCollection('staff_users');
+  const staff = await staffCollection.findOne({
+    email: { $regex: '^admin@codexdynamics\\.com$', $options: 'i' },
+  });
+  if (!staff || normalizeAdminRole(staff.role) !== 'Super Admin') {
+    await resetCollection.deleteOne({ id: SUPER_ADMIN_RESET_ID });
+    return res.status(400).json({ ok: false, error: 'The Super Admin account is unavailable.' });
+  }
+  await staffCollection.updateOne(
+    { id: staff.id },
+    { $set: { password, password_updated_at: new Date().toISOString() } }
+  );
+  await resetCollection.deleteOne({ id: SUPER_ADMIN_RESET_ID });
+  return res.json({ ok: true, message: 'Super Admin password reset successfully.' });
 });
 
 apiRouter.post('/admin/hostinger/mailboxes/:resourceId/send-to-client', async (req: Request, res: Response) => {
