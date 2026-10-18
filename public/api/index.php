@@ -659,8 +659,8 @@ if ($path === '/admin/password-reset/complete' && $method === 'POST') {
     if (!preg_match('/^\d{8}$/', $code)) {
         jsonOut(['ok' => false, 'error' => 'Enter the 8-digit reset code from the recovery email.'], 422);
     }
-    if (strlen($password) < 12 || strlen($password) > 128) {
-        jsonOut(['ok' => false, 'error' => 'The new password must be between 12 and 128 characters.'], 422);
+    if (strlen($password) < 8 || strlen($password) > 128) {
+        jsonOut(['ok' => false, 'error' => 'The new password must be between 8 and 128 characters.'], 422);
     }
 
     $resetId = 'super-admin';

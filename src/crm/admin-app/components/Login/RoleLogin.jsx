@@ -117,8 +117,8 @@ const RoleLogin = ({ role, onAdminLogin }) => {
       setRecoveryError('The new passwords do not match.');
       return;
     }
-    if (newPassword.length < 12) {
-      setRecoveryError('Use a password with at least 12 characters.');
+    if (newPassword.length < 8) {
+      setRecoveryError('Use a password with at least 8 characters.');
       return;
     }
 
@@ -306,19 +306,19 @@ const RoleLogin = ({ role, onAdminLogin }) => {
                 id="super-admin-new-password"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={8}
                 required
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
                 className="crm-role-login-recovery-input"
-                placeholder="At least 12 characters"
+                placeholder="At least 8 characters"
               />
               <label className="crm-inline-e86365d9a2" htmlFor="super-admin-confirm-password">Confirm new password</label>
               <input
                 id="super-admin-confirm-password"
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={8}
                 required
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}

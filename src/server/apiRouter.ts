@@ -1665,8 +1665,8 @@ apiRouter.post('/admin/password-reset/complete', async (req: Request, res: Respo
   if (!/^\d{8}$/.test(code)) {
     return res.status(422).json({ ok: false, error: 'Enter the 8-digit reset code from the recovery email.' });
   }
-  if (password.length < 12 || password.length > 128) {
-    return res.status(422).json({ ok: false, error: 'The new password must be between 12 and 128 characters.' });
+  if (password.length < 8 || password.length > 128) {
+    return res.status(422).json({ ok: false, error: 'The new password must be between 8 and 128 characters.' });
   }
 
   const resetCollection = getMongoCollection('admin_password_reset_tokens');
