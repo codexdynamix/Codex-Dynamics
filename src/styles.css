@@ -816,6 +816,16 @@
   }
 }
 
+@media (min-width: 1440px) {
+  .site-canvas .shell {
+    width: min(max(var(--container-max, 72rem), 90vw), 160rem, calc(100% - 5rem));
+  }
+
+  .site-canvas header nav {
+    max-width: min(90vw, 160rem);
+  }
+}
+
 .site-canvas[data-card-style="flat"] .surface-lift {
   box-shadow: none;
   background: var(--color-card);
