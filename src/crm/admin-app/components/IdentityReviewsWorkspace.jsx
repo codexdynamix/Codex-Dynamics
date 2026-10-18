@@ -14,26 +14,6 @@ const buttonBase = {
   cursor: 'pointer',
 };
 
-function handleDialogKeyDown(event, onClose, locked = false) {
-  if (event.key === 'Escape' && !locked) {
-    onClose();
-    return;
-  }
-  if (event.key !== 'Tab') return;
-  const dialog = event.currentTarget.querySelector('[role="dialog"], [role="alertdialog"]');
-  const focusable = [...(dialog?.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])];
-  if (!focusable.length) return;
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
-
 function ClientIdentity({ side, name, company, email, phone, clientId }) {
   return (
     <div className="crm-inline-93af0493e4" data-testid={`identity-client-${side}-${clientId}`}>
@@ -51,59 +31,6 @@ function ClientIdentity({ side, name, company, email, phone, clientId }) {
   );
 }
 
-function MergeDialog({ review, busy, error, onClose, onConfirm }) {
-  const [primaryClientId, setPrimaryClientId] = useState(String(review.client_id_a));
-  const [acknowledged, setAcknowledged] = useState(false);
-  const primaryIsA = String(primaryClientId) === String(review.client_id_a);
-  const keptClient = primaryIsA
-    ? { name: review.client_a_name, company: review.client_a_company, id: review.client_id_a }
-    : { name: review.client_b_name, company: review.client_b_company, id: review.client_id_b };
-  const mergedClient = primaryIsA
-    ? { name: review.client_b_name, company: review.client_b_company, id: review.client_id_b }
-    : { name: review.client_a_name, company: review.client_a_company, id: review.client_id_a };
-
-  return (
-    <div
-      role="presentation"
-      onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}
-      onKeyDown={(event) => handleDialogKeyDown(event, onClose, busy)}
-      className="crm-inline-f8c1d6e303"
-      data-testid="overlay-identity-merge"
-    >
-      <section role="dialog" aria-modal="true" aria-labelledby="merge-identity-title" aria-describedby="merge-identity-description" className="crm-inline-9d7ddaa678" data-testid={`dialog-merge-identity-${review.client_id_a}-${review.client_id_b}`}>
-        <p className="crm-inline-a271fddf57">Sensitive account action</p>
-        <h3 id="merge-identity-title" className="crm-inline-728da2550c">Choose the Client record to keep</h3>
-        <p id="merge-identity-description" className="crm-inline-a007a35741">Confirming immediately merges the other Client into the selected primary record and moves related records. This cannot be undone here. If identifiers, portal accounts, or workspaces conflict, the server blocks the merge without changing data.</p>
-
-        <label htmlFor="identity-primary-client" className="crm-inline-2c383753af">
-          Primary Client record to keep
-          <select id="identity-primary-client" autoFocus value={primaryClientId} onChange={(event) => setPrimaryClientId(event.target.value)} className="crm-themed-form-control crm-themed-form-control--identity" data-testid={`select-primary-client-${review.client_id_a}-${review.client_id_b}`}>
-            <option value={String(review.client_id_a)}>Keep {review.client_a_name || 'Client A'} · ID {review.client_id_a}</option>
-            <option value={String(review.client_id_b)}>Keep {review.client_b_name || 'Client B'} · ID {review.client_id_b}</option>
-          </select>
-        </label>
-
-        <div className="identity-merge-summary crm-inline-3a8540a13a"  data-testid={`summary-identity-merge-${review.client_id_a}-${review.client_id_b}`}>
-          <div><span className="crm-inline-a48af561d0">Keep</span><strong className="crm-inline-dba4ac4778">{keptClient.name || 'Unnamed client'}</strong><span className="crm-inline-2d4293ada5">ID {keptClient.id}{keptClient.company ? ` · ${keptClient.company}` : ''}</span></div>
-          <span className="identity-merge-arrow crm-inline-5f4c84f4db" aria-hidden="true" >→</span>
-          <div><span className="crm-inline-0ebad092ae">Merge into kept record</span><strong className="crm-inline-dba4ac4778">{mergedClient.name || 'Unnamed client'}</strong><span className="crm-inline-2d4293ada5">ID {mergedClient.id}{mergedClient.company ? ` · ${mergedClient.company}` : ''}</span></div>
-        </div>
-
-        <label className="crm-inline-9c63c709d0">
-          <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} className="crm-inline-c0d2e96ce1" data-testid={`checkbox-confirm-identity-merge-${review.client_id_a}-${review.client_id_b}`} />
-          <span>I reviewed both records and confirm {mergedClient.name || `Client ${mergedClient.id}`} should be merged into {keptClient.name || `Client ${keptClient.id}`}.</span>
-        </label>
-
-        {error && <p role="alert" className="crm-inline-d797db5eb0" data-testid={`alert-identity-merge-error-${review.client_id_a}-${review.client_id_b}`}>{error}</p>}
-        <div className="crm-inline-500441e4da">
-          <button type="button" style={buttonBase} onClick={onClose} disabled={busy} data-testid={`button-cancel-identity-merge-${review.client_id_a}-${review.client_id_b}`}>Cancel</button>
-          <button type="button" style={{ ...buttonBase, borderColor: 'rgba(231,173,100,.55)', background: 'rgba(231,173,100,.13)', color: '#f1c27e' }} onClick={() => onConfirm(primaryIsA ? review.client_id_a : review.client_id_b)} disabled={busy || !acknowledged} data-testid={`button-confirm-identity-merge-${review.client_id_a}-${review.client_id_b}`}>{busy ? 'Merging…' : 'Confirm merge'}</button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 export default function IdentityReviewsWorkspace({
   reviews = [],
   loading = false,
@@ -112,10 +39,8 @@ export default function IdentityReviewsWorkspace({
   onResolve = async () => {},
 }) {
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [mergeReview, setMergeReview] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('pending');
   const [busyKey, setBusyKey] = useState('');
-  const [mergeError, setMergeError] = useState('');
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -123,7 +48,7 @@ export default function IdentityReviewsWorkspace({
   const filteredReviews = useMemo(() => {
     const query = search.trim().toLowerCase();
     return reviews.filter((review) => {
-      if (statusFilter && review.status !== statusFilter) return false;
+      if (statusFilter !== 'all' && statusFilter && review.status !== statusFilter) return false;
       if (!query) return true;
       return [
         review.client_a_name,
@@ -142,32 +67,26 @@ export default function IdentityReviewsWorkspace({
     });
   }, [reviews, search, statusFilter]);
 
-  const runResolve = async (review, decision, primaryClientId = null) => {
+  const runResolve = async (review, decision) => {
     const key = `${review.client_id_a}-${review.client_id_b}`;
     setBusyKey(key);
     setActionError('');
-    setMergeError('');
     setNotice('');
     try {
-      const result = await onResolve({ review, decision, primaryClientId });
+      const result = await onResolve({ review, decision });
       if (result === false || result?.ok === false || result?.success === false) {
         throw new Error(result?.error || 'The identity service did not confirm this resolution.');
       }
     } catch (reason) {
       const message = reason?.message || 'The identity review could not be resolved.';
-      if (decision === 'merge') setMergeError(message);
-      else setActionError(message);
+      setActionError(message);
       setNotice('');
       setBusyKey('');
       return;
     }
-    setNotice(decision === 'merge'
-      ? 'Merge request submitted. Checking the latest review data.'
-      : 'Distinct-client decision submitted. Checking the latest review data.');
-    if (decision === 'merge') setMergeReview(null);
+    setNotice('Marked as distinct. Refreshing the review queue.');
     try {
-      await onReload();
-      setNotice('Refresh requested. This list remains sourced from the review data provided by the parent; a pair stays visible until updated data is supplied.');
+      await onReload(statusFilter || 'pending');
     } catch (reason) {
       setActionError(`Resolution submitted, but the review queue could not be refreshed: ${reason?.message || 'Please try again.'}`);
     } finally {
@@ -175,17 +94,15 @@ export default function IdentityReviewsWorkspace({
     }
   };
 
-  const activeReviewKey = mergeReview ? `${mergeReview.client_id_a}-${mergeReview.client_id_b}` : '';
-
   return (
     <section className="identity-reviews-workspace crm-inline-39dbf40f7f" aria-labelledby="identity-reviews-title"  data-testid="workspace-identity-reviews">
       <header className="crm-inline-91c912957d">
         <div>
           <p className="crm-inline-a271fddf57">Super Admin · Identity integrity</p>
           <h2 id="identity-reviews-title" className="crm-inline-60ab2db7aa">Client identity reviews</h2>
-          <p className="crm-inline-441384af36">Review possible duplicate Client records. Resolve a pair as distinct or carefully merge one record into the other.</p>
+          <p className="crm-inline-441384af36">Review client records that share contact details. Mark a pair as distinct after comparing both records. Merging is disabled until related data can be transferred safely.</p>
         </div>
-        <button type="button" style={buttonBase} onClick={onReload} disabled={loading || Boolean(busyKey)} data-testid="button-reload-identity-reviews">{loading ? 'Refreshing…' : 'Refresh queue'}</button>
+        <button type="button" style={buttonBase} onClick={() => onReload(statusFilter || 'pending')} disabled={loading || Boolean(busyKey)} data-testid="button-reload-identity-reviews">{loading ? 'Refreshing…' : 'Refresh queue'}</button>
       </header>
 
       <div className="identity-reviews-summary crm-inline-19890b8917"  data-testid="summary-identity-reviews">
@@ -204,7 +121,7 @@ export default function IdentityReviewsWorkspace({
             onChange={setSearch}
             placeholder="Client, email, company, reason, ID…"
             className="crm-themed-form-control crm-themed-form-control--identity"
-            buildSuggestions={(query) => reviews.filter((review) => (!statusFilter || review.status === statusFilter) && [
+            buildSuggestions={(query) => reviews.filter((review) => (statusFilter === 'all' || !statusFilter || review.status === statusFilter) && [
               review.client_a_name, review.client_a_company, review.client_a_email, review.client_a_phone,
               review.client_b_name, review.client_b_company, review.client_b_email, review.client_b_phone,
               review.reason, review.status, review.client_id_a, review.client_id_b,
@@ -218,9 +135,14 @@ export default function IdentityReviewsWorkspace({
           />
         </label>
         <label htmlFor="identity-review-status-filter" className="crm-inline-520ac58ffa">Review status
-          <select id="identity-review-status-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="crm-themed-form-control crm-themed-form-control--identity" data-testid="filter-identity-reviews-status">
-            <option value="">All statuses</option>
-            {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+          <select id="identity-review-status-filter" value={statusFilter} onChange={(event) => {
+            const nextStatus = event.target.value;
+            setStatusFilter(nextStatus);
+            void onReload(nextStatus);
+          }} className="crm-themed-form-control crm-themed-form-control--identity" data-testid="filter-identity-reviews-status">
+            <option value="pending">Needs review</option>
+            <option value="distinct">Marked distinct</option>
+            <option value="all">All statuses</option>
           </select>
         </label>
       </div>
@@ -231,8 +153,8 @@ export default function IdentityReviewsWorkspace({
 
       {!loading && !error && reviews.length === 0 && <div className="crm-inline-38d180080d" data-testid="empty-identity-reviews">
         <span aria-hidden="true" className="crm-inline-df38bf24b8">?</span>
-        <h3 className="crm-inline-b2ce718d54">No identity reviews waiting</h3>
-        <p className="crm-inline-b09a9a5b62">When a possible duplicate Client pair needs attention, it will appear here.</p>
+        <h3 className="crm-inline-b2ce718d54">{statusFilter === 'pending' ? 'No identity reviews waiting' : 'No matching identity reviews'}</h3>
+        <p className="crm-inline-b09a9a5b62">Potential duplicates with matching email addresses or phone numbers appear here automatically.</p>
       </div>}
 
       {!loading && reviews.length > 0 && filteredReviews.length === 0 && <div className="crm-inline-2c8f469258" data-testid="empty-filtered-identity-reviews">No reviews match your search or status filter.</div>}
@@ -265,8 +187,8 @@ export default function IdentityReviewsWorkspace({
               <div className="crm-inline-a37fd3c259">
                 <p className="crm-inline-3b1ae40ed8">Resolve only after comparing the contact and company details above.</p>
                 <div className="crm-inline-8e45b81904">
-                  <button type="button" style={{ ...buttonBase, borderColor: 'rgba(68,211,162,.35)', color: '#72d8af' }} disabled={busy || Boolean(busyKey)} onClick={() => runResolve(review, 'distinct')} data-testid={`button-mark-distinct-${review.client_id_a}-${review.client_id_b}`}>{busy && !mergeReview ? 'Saving…' : 'Mark as distinct'}</button>
-                  <button type="button" style={{ ...buttonBase, borderColor: 'rgba(231,173,100,.38)', color: '#f1c27e' }} disabled={busy || Boolean(busyKey)} onClick={() => { setMergeReview(review); setMergeError(''); }} data-testid={`button-start-merge-${review.client_id_a}-${review.client_id_b}`}>Review merge</button>
+                  {review.status === 'pending' && <button type="button" style={{ ...buttonBase, borderColor: 'rgba(68,211,162,.35)', color: '#72d8af' }} disabled={busy || Boolean(busyKey)} onClick={() => runResolve(review, 'distinct')} data-testid={`button-mark-distinct-${review.client_id_a}-${review.client_id_b}`}>{busy ? 'Saving…' : 'Mark as distinct'}</button>}
+                  {review.status !== 'pending' && <span className="crm-inline-2d4293ada5">{review.status === 'distinct' ? 'Resolved as distinct' : `Resolved: ${review.status}`}</span>}
                 </div>
               </div>
             </article>
@@ -274,13 +196,6 @@ export default function IdentityReviewsWorkspace({
         })}
       </div>}
 
-      {mergeReview && <MergeDialog
-        review={mergeReview}
-        busy={busyKey === activeReviewKey}
-        error={mergeError}
-        onClose={() => { if (busyKey !== activeReviewKey) setMergeReview(null); }}
-        onConfirm={(primaryClientId) => runResolve(mergeReview, 'merge', primaryClientId)}
-      />}
     </section>
   );
 }

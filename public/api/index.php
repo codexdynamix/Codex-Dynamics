@@ -511,6 +511,96 @@ function collectProjectCategories(array $savedCategories, array $projects): arra
     return array_values($categories);
 }
 
+function identityReviewPairKey(string $clientIdA, string $clientIdB): string {
+    $ids = [$clientIdA, $clientIdB];
+    sort($ids, SORT_STRING);
+    return hash('sha256', json_encode($ids, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+
+function buildClientIdentityReviews(array $clients, array $savedReviews): array {
+    $savedByPair = [];
+    foreach ($savedReviews as $saved) {
+        $idA = (string)($saved['client_id_a'] ?? '');
+        $idB = (string)($saved['client_id_b'] ?? '');
+        if ($idA === '' || $idB === '' || $idA === $idB) continue;
+        $pairKey = (string)($saved['pair_key'] ?? identityReviewPairKey($idA, $idB));
+        $savedByPair[$pairKey] = $saved;
+    }
+
+    $groups = [];
+    foreach ($clients as $client) {
+        if (($client['is_bin'] ?? false) === true || !empty($client['deleted_at'])) continue;
+        $clientId = trim((string)($client['id'] ?? ''));
+        if ($clientId === '') continue;
+        $email = strtolower(trim((string)($client['email'] ?? $client['email_address'] ?? '')));
+        $phone = preg_replace('/\D+/', '', (string)($client['phone'] ?? $client['phone_number'] ?? $client['mobile'] ?? ''));
+        $identifiers = [];
+        if (str_contains($email, '@')) $identifiers[] = ['value' => $email, 'reason' => 'Matching email address'];
+        if (strlen($phone) >= 7) $identifiers[] = ['value' => $phone, 'reason' => 'Matching phone number'];
+        foreach ($identifiers as $identifier) {
+            $key = $identifier['reason'] . ':' . $identifier['value'];
+            $groups[$key][] = ['client' => $client, 'reason' => $identifier['reason']];
+        }
+    }
+
+    $candidates = [];
+    foreach ($groups as $group) {
+        $count = count($group);
+        for ($i = 0; $i < $count; $i++) {
+            for ($j = $i + 1; $j < $count; $j++) {
+                $first = $group[$i]['client'];
+                $second = $group[$j]['client'];
+                $firstId = (string)$first['id'];
+                $secondId = (string)$second['id'];
+                if ($firstId === $secondId) continue;
+                if (strcmp($firstId, $secondId) < 0) {
+                    $clientA = $first;
+                    $clientB = $second;
+                } else {
+                    $clientA = $second;
+                    $clientB = $first;
+                }
+                $idA = (string)$clientA['id'];
+                $idB = (string)$clientB['id'];
+                $pairKey = identityReviewPairKey($idA, $idB);
+                if (!isset($candidates[$pairKey])) {
+                    $saved = $savedByPair[$pairKey] ?? [];
+                    $candidates[$pairKey] = array_merge($saved, [
+                        'id' => $saved['id'] ?? 'identity_' . $pairKey,
+                        'pair_key' => $pairKey,
+                        'client_id_a' => $idA,
+                        'client_id_b' => $idB,
+                        'client_a_name' => $clientA['name'] ?? $clientA['full_name'] ?? '',
+                        'client_a_company' => $clientA['company'] ?? '',
+                        'client_a_email' => $clientA['email'] ?? $clientA['email_address'] ?? '',
+                        'client_a_phone' => $clientA['phone'] ?? $clientA['phone_number'] ?? $clientA['mobile'] ?? '',
+                        'client_b_name' => $clientB['name'] ?? $clientB['full_name'] ?? '',
+                        'client_b_company' => $clientB['company'] ?? '',
+                        'client_b_email' => $clientB['email'] ?? $clientB['email_address'] ?? '',
+                        'client_b_phone' => $clientB['phone'] ?? $clientB['phone_number'] ?? $clientB['mobile'] ?? '',
+                        'reason' => '',
+                        'status' => $saved['status'] ?? 'pending',
+                        'created_at' => $saved['created_at'] ?? $clientA['created_at'] ?? $clientB['created_at'] ?? '',
+                    ]);
+                    $candidates[$pairKey]['reasons'] = [];
+                }
+                $candidates[$pairKey]['reasons'][] = $group[$i]['reason'];
+            }
+        }
+    }
+
+    foreach ($candidates as $pairKey => &$candidate) {
+        $candidate['reason'] = implode(' and ', array_unique($candidate['reasons']));
+        unset($candidate['reasons']);
+    }
+    unset($candidate);
+
+    foreach ($savedByPair as $pairKey => $saved) {
+        if (!isset($candidates[$pairKey])) $candidates[$pairKey] = array_merge($saved, ['pair_key' => $pairKey]);
+    }
+    return array_values($candidates);
+}
+
 // Health check
 if ($path === '/healthz') {
     jsonOut([
@@ -528,7 +618,11 @@ if ($path === '/healthz') {
 if ($path === '/public/content' || $path === '/content') {
     $projects = MongoService::getCollection('projects');
     $blogs = MongoService::getCollection('blogs');
-    $reviews = MongoService::getCollection('reviews');
+    $reviews = array_values(array_filter(MongoService::getCollection('reviews'), function(array $review): bool {
+        $value = $review['is_published'] ?? false;
+        return $value === true || $value === 1
+            || (is_string($value) && in_array(strtolower(trim($value)), ['1', 'true', 'published', 'yes'], true));
+    }));
     $categories = collectProjectCategories(MongoService::getCollection('project_categories'), $projects);
     jsonOut([
         'ok' => true,
@@ -842,6 +936,83 @@ if ($path === '/admin/clients' && $method === 'GET') {
         'hasMore' => $hasMore,
         'has_more' => $hasMore,
     ]);
+}
+
+if ($path === '/admin/client-identity-reviews' && $method === 'GET') {
+    $staff = chatStaffFromRequest();
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+    if ($role !== 'superadmin') jsonOut(['ok' => false, 'error' => 'Only Super Admin can review client identities.'], 403);
+
+    $status = strtolower(trim((string)($_GET['status'] ?? 'pending')));
+    if (!in_array($status, ['pending', 'distinct', 'merged', 'all'], true)) {
+        jsonOut(['ok' => false, 'error' => 'Choose pending, distinct, merged, or all reviews.'], 422);
+    }
+    $clients = MongoService::getCollection('clients', [
+        '$and' => [
+            ['is_bin' => ['$ne' => true]],
+            ['$or' => [
+                ['deleted_at' => ['$exists' => false]],
+                ['deleted_at' => null],
+                ['deleted_at' => ''],
+            ]],
+        ],
+    ], 10000);
+    $reviews = array_values(array_filter(
+        buildClientIdentityReviews($clients, MongoService::getCollection('client_identity_reviews', [], 10000)),
+        fn(array $review): bool => $status === 'all' || ($review['status'] ?? 'pending') === $status
+    ));
+    jsonOut(['ok' => true, 'reviews' => $reviews]);
+}
+
+if (preg_match('#^/admin/client-identity-reviews/([^/]+)/([^/]+)$#', $path, $matches) && $method === 'POST') {
+    $staff = chatStaffFromRequest();
+    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+    if ($role !== 'superadmin') jsonOut(['ok' => false, 'error' => 'Only Super Admin can resolve client identity reviews.'], 403);
+
+    $decision = strtolower(trim((string)($body['decision'] ?? '')));
+    if ($decision === 'merge') {
+        jsonOut([
+            'ok' => false,
+            'error' => 'Client merging is unavailable here because related client records cannot yet be transferred safely.',
+        ], 422);
+    }
+    if ($decision !== 'distinct') jsonOut(['ok' => false, 'error' => 'Choose a supported identity review decision.'], 422);
+
+    $clientIdA = rawurldecode($matches[1]);
+    $clientIdB = rawurldecode($matches[2]);
+    if ($clientIdA === '' || $clientIdB === '' || $clientIdA === $clientIdB) {
+        jsonOut(['ok' => false, 'error' => 'Choose two different client records.'], 422);
+    }
+    $pairKey = identityReviewPairKey($clientIdA, $clientIdB);
+    $clients = MongoService::getCollection('clients', [
+        'id' => ['$in' => [$clientIdA, $clientIdB]],
+        '$and' => [
+            ['is_bin' => ['$ne' => true]],
+            ['$or' => [
+                ['deleted_at' => ['$exists' => false]],
+                ['deleted_at' => null],
+                ['deleted_at' => ''],
+            ]],
+        ],
+    ], 10);
+    $savedReviews = MongoService::getCollection('client_identity_reviews', ['pair_key' => $pairKey], 10);
+    $candidate = null;
+    foreach (buildClientIdentityReviews($clients, $savedReviews) as $review) {
+        if (($review['pair_key'] ?? '') === $pairKey) {
+            $candidate = $review;
+            break;
+        }
+    }
+    if ($candidate === null) jsonOut(['ok' => false, 'error' => 'This client pair is no longer an active identity review.'], 404);
+
+    $review = array_merge($candidate, [
+        'status' => 'distinct',
+        'decision' => 'distinct',
+        'resolved_at' => date('c'),
+        'resolved_by' => (string)($staff['id'] ?? ''),
+    ]);
+    MongoService::updateOneWithOptions('client_identity_reviews', ['pair_key' => $pairKey], $review, ['upsert' => true]);
+    jsonOut(['ok' => true, 'review' => $review]);
 }
 
 if (str_starts_with($path, '/admin/clients/search')) {

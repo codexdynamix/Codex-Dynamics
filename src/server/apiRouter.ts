@@ -3,6 +3,7 @@ import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getMongoCollection, isMongoConnected, getDatabaseName } from './mongo.ts';
+import { buildClientIdentityReviews, identityReviewPairKey } from './clientIdentityReviews.ts';
 import { SEED_STAFF } from './seedData.ts';
 import { normalizeAdminRole } from '../crm/roleNormalization.js';
 
@@ -166,12 +167,18 @@ apiRouter.use((_req: Request, res: Response, next) => {
 // ---------------------------------------------------------------------------
 // 1. PUBLIC WEBSITE CONTENT & ENQUIRIES
 // ---------------------------------------------------------------------------
+function isPublishedReview(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  if (typeof value !== 'string') return false;
+  return ['1', 'true', 'published', 'yes'].includes(value.trim().toLowerCase());
+}
+
 const handlePublicContent = async (_req: Request, res: Response) => {
   try {
     const [projects, blogs, reviews, projectCategories] = await Promise.all([
       getMongoCollection('projects').find({ published: { $ne: false } }),
       getMongoCollection('blogs').find({ status: 'published' }),
-      getMongoCollection('reviews').find({ is_published: { $ne: 0 } }),
+      getMongoCollection('reviews').find(),
       getMongoCollection('project_categories').find(),
     ]);
     const categories = new Map<string, string>();
@@ -190,7 +197,9 @@ const handlePublicContent = async (_req: Request, res: Response) => {
       projects: projects.map((p) => ({ ...p, id: p.id || p._id, is_published: true, published: true })),
       categories: [...categories.values()],
       blogs: blogs.map((b) => ({ ...b, id: b.id || b._id })),
-      reviews: reviews.map((r) => ({ ...r, id: r.id || r._id })),
+      reviews: reviews
+        .filter((review) => isPublishedReview(review.is_published))
+        .map((review) => ({ ...review, id: review.id || review._id })),
       backlinks: [],
     });
   } catch (error: any) {
@@ -1003,8 +1012,90 @@ apiRouter.delete('/admin/client-projects/:id', async (req: Request, res: Respons
 });
 
 apiRouter.get('/admin/client-identity-reviews', async (_req: Request, res: Response) => {
-  const reviews = await getMongoCollection('client_identity_reviews').find();
+  const staff = await requireChatStaff(_req, res);
+  if (!staff) return;
+  if (normalizeAdminRole(staff.role) !== 'Super Admin') {
+    return res.status(403).json({ ok: false, error: 'Only Super Admin can review client identities.' });
+  }
+
+  const status = String(_req.query.status || 'pending').trim().toLowerCase();
+  if (!['pending', 'distinct', 'merged', 'all'].includes(status)) {
+    return res.status(422).json({ ok: false, error: 'Choose pending, distinct, merged, or all reviews.' });
+  }
+
+  const [clients, savedReviews] = await Promise.all([
+    getMongoCollection('clients').find({
+      is_bin: { $ne: true },
+      $or: [
+        { deleted_at: { $exists: false } },
+        { deleted_at: null },
+        { deleted_at: '' },
+      ],
+    }),
+    getMongoCollection('client_identity_reviews').find(),
+  ]);
+  const reviews = buildClientIdentityReviews(clients, savedReviews)
+    .filter((review) => status === 'all' || review.status === status);
   res.json({ ok: true, reviews });
+});
+
+apiRouter.post('/admin/client-identity-reviews/:clientIdA/:clientIdB', async (req: Request, res: Response) => {
+  const staff = await requireChatStaff(req, res);
+  if (!staff) return;
+  if (normalizeAdminRole(staff.role) !== 'Super Admin') {
+    return res.status(403).json({ ok: false, error: 'Only Super Admin can resolve client identity reviews.' });
+  }
+
+  const decision = String(req.body?.decision || '').trim().toLowerCase();
+  if (decision === 'merge') {
+    return res.status(422).json({
+      ok: false,
+      error: 'Client merging is unavailable here because related client records cannot yet be transferred safely.',
+    });
+  }
+  if (decision !== 'distinct') {
+    return res.status(422).json({ ok: false, error: 'Choose a supported identity review decision.' });
+  }
+
+  const clientIdA = String(req.params.clientIdA || '');
+  const clientIdB = String(req.params.clientIdB || '');
+  if (!clientIdA || !clientIdB || clientIdA === clientIdB) {
+    return res.status(422).json({ ok: false, error: 'Choose two different client records.' });
+  }
+
+  const pairKey = identityReviewPairKey(clientIdA, clientIdB);
+  const [clients, savedReviews] = await Promise.all([
+    getMongoCollection('clients').find({
+      id: { $in: [clientIdA, clientIdB] },
+      is_bin: { $ne: true },
+      $or: [
+        { deleted_at: { $exists: false } },
+        { deleted_at: null },
+        { deleted_at: '' },
+      ],
+    }),
+    getMongoCollection('client_identity_reviews').find({ pair_key: pairKey }),
+  ]);
+  const candidate = buildClientIdentityReviews(clients, savedReviews)
+    .find((review) => review.pair_key === pairKey);
+  if (!candidate) {
+    return res.status(404).json({ ok: false, error: 'This client pair is no longer an active identity review.' });
+  }
+
+  const resolvedAt = new Date().toISOString();
+  const review = {
+    ...candidate,
+    status: 'distinct',
+    decision: 'distinct',
+    resolved_at: resolvedAt,
+    resolved_by: String(staff.id || ''),
+  };
+  await getMongoCollection('client_identity_reviews').updateOne(
+    { pair_key: pairKey },
+    { $set: review },
+    { upsert: true },
+  );
+  res.json({ ok: true, review });
 });
 
 // ---------------------------------------------------------------------------

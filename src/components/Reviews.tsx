@@ -3,6 +3,13 @@ import { Star, Quote, CheckCircle2 } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import type { Review } from "@/types/crm";
 
+function isPublishedReview(review: Review): boolean {
+  const value: unknown = review.is_published;
+  if (value === true || value === 1) return true;
+  if (typeof value !== "string") return false;
+  return ["1", "true", "published", "yes"].includes(value.trim().toLowerCase());
+}
+
 export function Reviews() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loadError, setLoadError] = useState("");
@@ -21,7 +28,7 @@ export function Reviews() {
           throw new Error("The reviews response was invalid.");
         }
         if (!active) return;
-        setReviews(payload.reviews.filter((review: Review) => Boolean(review.is_published)));
+        setReviews(payload.reviews.filter(isPublishedReview));
         setLoadError("");
       } catch (error) {
         if (!active) return;
@@ -36,7 +43,6 @@ export function Reviews() {
 
   return (
     <section
-      id="reviews"
       aria-label="Client Reviews"
       className="scroll-mt-24 border-t border-border/40 bg-background py-16 sm:py-24"
     >
@@ -76,7 +82,7 @@ export function Reviews() {
                           <Star
                             key={i}
                             className={`h-4 w-4 ${
-                              i < rev.rating
+                              i < Math.max(0, Math.min(5, Number(rev.rating) || 0))
                                 ? "fill-amber-400 text-amber-400"
                                 : "text-muted-foreground/30"
                             }`}
@@ -86,17 +92,17 @@ export function Reviews() {
                       <Quote className="h-6 w-6 text-muted-foreground/20" />
                     </div>
                     <p className="text-sm leading-relaxed text-muted-foreground">
-                      &ldquo;{rev.comment}&rdquo;
+                      &ldquo;{rev.comment || ""}&rdquo;
                     </p>
                   </div>
 
                   <div className="mt-6 pt-5 border-t border-border/40 flex items-center gap-3">
                     <div className="h-9 w-9 rounded-full bg-gradient-to-br from-neutral-800 to-neutral-900 border border-neutral-700 flex items-center justify-center text-xs font-semibold text-paper">
-                      {rev.author.charAt(0).toUpperCase()}
+                      {(rev.author || "Client").charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-label truncate">
-                        {rev.author}
+                        {rev.author || "Client"}
                       </p>
                       <p className="text-xs text-subtle truncate">
                         Verified Client

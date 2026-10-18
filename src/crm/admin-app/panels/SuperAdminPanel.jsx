@@ -2510,11 +2510,11 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
       setClientProjectsLoading(false);
     }
   };
-  const reloadIdentityReviews = async () => {
+  const reloadIdentityReviews = async (status = 'pending') => {
     setIdentityReviewsLoading(true);
     setIdentityReviewsError('');
     try {
-      setIdentityReviews(await getAdminClientIdentityReviews('pending'));
+      setIdentityReviews(await getAdminClientIdentityReviews(status));
     } catch (error) {
       setIdentityReviewsError(error.message || 'Client identity reviews could not be loaded.');
     } finally {
@@ -2915,7 +2915,9 @@ function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, crea
               className="crm-super-admin-tabs"
             >
               {tabs.map(tab => {
-                const badge = tab.name === 'Identity Reviews' ? identityReviews.length : 0;
+                const badge = tab.name === 'Identity Reviews'
+                  ? identityReviews.filter((review) => review.status === 'pending').length
+                  : 0;
                 return (
                   <button
                     key={tab.name}
