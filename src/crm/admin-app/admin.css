@@ -7423,6 +7423,53 @@
 .crm-admin-app .crm-client-account-panel > div {
   margin-top: 14px;
 }
+.crm-admin-app .crm-client-security-profile {
+  scroll-margin-top: 24px;
+  margin: 0 0 18px;
+  padding: 18px;
+}
+.crm-admin-app .crm-client-security-profile .crm-client-email-accounts-heading {
+  margin-bottom: 14px;
+}
+.crm-admin-app .crm-client-security-profile .crm-client-email-accounts-heading h3 {
+  margin: 0;
+}
+.crm-admin-app .crm-client-security-profile .crm-client-email-accounts-heading p {
+  margin: 4px 0 0;
+  color: var(--crm-text-secondary);
+}
+.crm-admin-app .crm-client-security-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.crm-admin-app .crm-client-security-profile-grid .crm-field-group {
+  min-width: 0;
+  margin: 0;
+}
+.crm-admin-app .crm-client-security-profile-grid .crm-input {
+  width: 100%;
+}
+.crm-admin-app .crm-client-security-password {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.crm-admin-app .crm-client-security-password .crm-input {
+  min-width: 0;
+  flex: 1;
+}
+.crm-admin-app .crm-client-security-new-password {
+  grid-column: 1 / -1;
+}
+@media (max-width: 700px) {
+  .crm-admin-app .crm-client-security-profile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .crm-admin-app .crm-client-security-new-password {
+    grid-column: auto;
+  }
+}
 .crm-admin-app.crm-admin-app .crm-logout-btn {
   display: inline-flex;
   background: #FF3B30;

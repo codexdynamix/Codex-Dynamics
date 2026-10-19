@@ -51,6 +51,20 @@ function setPortalSessionCookie(req: Request, res: Response, token: string) {
     maxAge: 12 * 60 * 60 * 1000,
   });
 }
+function getClientDisplayName(client: Record<string, unknown>): string {
+  const configuredName = String(client.name || '').trim();
+  if (configuredName && configuredName.toLowerCase() !== 'client') return configuredName;
+  const fullName = String(client.full_name || client.display_name || '').trim();
+  if (fullName && fullName.toLowerCase() !== 'client') return fullName;
+  const firstName = String(client.firstName || client.first_name || '').trim();
+  const lastName = String(client.lastName || client.last_name || '').trim();
+  const personName = `${firstName} ${lastName}`.trim();
+  if (personName) return personName;
+  const company = String(client.company || '').trim();
+  if (company && company.toLowerCase() !== 'client') return company;
+  const emailName = String(client.email || '').split('@')[0].replace(/[._-]+/g, ' ').trim();
+  return emailName || 'Client';
+}
 function setAdminSessionCookie(req: Request, res: Response, token: string) {
   const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
   res.cookie('cdx_admin_session', token, {
@@ -3090,8 +3104,8 @@ apiRouter.post('/portal/login', async (req: Request, res: Response) => {
       token,
       client: {
         id: client.id,
-        name: client.name || 'Client',
-        company: client.company || client.name,
+        name: getClientDisplayName(client),
+        company: String(client.company || getClientDisplayName(client)),
         email: client.email,
         phone: client.phone || '',
         address: client.address || '',
@@ -3116,7 +3130,30 @@ apiRouter.post('/portal/change-password', async (req: Request, res: Response) =>
   res.json({ ok: true, message: 'Client portal password updated in MongoDB.' });
 });
 
-apiRouter.post('/portal/logout', (_req: Request, res: Response) => {
+apiRouter.post('/portal/logout', async (req: Request, res: Response) => {
+  const authorization = String(req.headers.authorization || '');
+  const cookieToken = String(req.headers.cookie || '')
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('cdx_portal_session='))
+    ?.slice('cdx_portal_session='.length) || '';
+  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || cookieToken;
+  const match = token.match(/^cdx_portal_(?:mongo|php_mongo|impersonate)_(.+)_(\d{10,13})$/);
+  if (match) {
+    const issuedAt = Number(match[2]) * (match[2].length === 10 ? 1000 : 1);
+    await getMongoCollection('live_sessions').updateOne(
+      { id: `client_${match[1]}_${issuedAt}` },
+      { $set: { revoked: true, is_online: false, logged_out_at: new Date().toISOString() } },
+      { upsert: false }
+    );
+  }
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  res.clearCookie('cdx_portal_session', {
+    httpOnly: true,
+    secure: req.secure || forwardedProto === 'https',
+    sameSite: 'lax',
+    path: '/api/',
+  });
   res.json({ ok: true });
 });
 

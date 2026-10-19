@@ -330,7 +330,18 @@ function fromApiRow(row: any): any {
     return [normalizedKey, value];
   }));
   if ('email' in normalized || 'portalEnabled' in normalized) {
-    const name = String(normalized.name ?? '').trim() || 'Client';
+    const configuredName = String(normalized.name ?? '').trim();
+    const firstName = String(normalized.firstName ?? '').trim();
+    const lastName = String(normalized.lastName ?? '').trim();
+    const personName = `${firstName} ${lastName}`.trim();
+    const emailName = String(normalized.email ?? '').split('@')[0].replace(/[._-]+/g, ' ').trim();
+    const name = configuredName && configuredName.toLowerCase() !== 'client'
+      ? configuredName
+      : String(normalized.fullName ?? normalized.displayName ?? '').trim()
+        || personName
+        || String(normalized.company ?? '').trim()
+        || emailName
+        || 'Client';
     normalized.name = name;
     normalized.company = String(normalized.company ?? '').trim() || name;
     normalized.email = String(normalized.email ?? '');

@@ -54,7 +54,7 @@ export function readPortalSession(): PortalSession | null {
 
     // Standard client login verification
     const freshClient = portalDb.getClientById(client.id);
-    if (!freshClient || !freshClient.portalEnabled || freshClient.status !== 'Active') {
+    if (!freshClient || !freshClient.portalEnabled || freshClient.status === 'Suspended') {
       clearPortalSession();
       return null;
     }

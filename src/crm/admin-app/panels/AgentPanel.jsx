@@ -602,6 +602,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
   const workspacePath = getRoleWorkspacePath(role, currentUser?.id);
   const visibleClients = getRoleScopedClients(data, role, currentUser);
   const client = visibleClients.find((l) => l.id === clientId);
+  const clientSecurityRef = useRef(null);
   const [profileSectionPermissions, setProfileSectionPermissions] = useState({});
   const [profilePermissionsError, setProfilePermissionsError] = useState('');
   const canReadAccessSection = isSuperAdmin || ['read', 'edit'].includes(profileSectionPermissions.access);
@@ -626,7 +627,6 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
   const [appointmentNotes, setAppointmentNotes] = useState('');
   const [appointmentSaving, setAppointmentSaving] = useState(false);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
-  const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [liveClientPassword, setLiveClientPassword] = useState('');
   const [passwordLoadError, setPasswordLoadError] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -826,7 +826,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
   }, [client?.id, client?.stage]);
 
   useEffect(() => {
-    if (!canManageClientSecurity || !client?.id || !showSecurityModal) {
+    if (!canManageClientSecurity || !client?.id) {
       setLiveClientPassword('');
       setPasswordLoadError('');
       setPasswordLoading(false);
@@ -847,7 +847,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
         if (!cancelled) setPasswordLoading(false);
       });
     return () => { cancelled = true; };
-  }, [canManageClientSecurity, showSecurityModal, client?.id]);
+  }, [canManageClientSecurity, client?.id]);
 
   const handleSendClientMessage = async () => {
     const text = chatInput.trim();
@@ -1116,7 +1116,7 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
         <div className="crm-profile-action-buttons">
           <button type="button" className="crm-action-btn crm-activity-btn" onClick={() => setShowActivityModal(true)} title="View client activity"><PaIcon name="activity" />Activity</button>
           <button type="button" className="crm-action-btn crm-appointment-btn" onClick={() => setShowAppointmentModal(true)} title="Schedule appointment"><PaIcon name="appointment" />Appointments</button>
-          {canManageClientSecurity && <button type="button" className="crm-action-btn crm-security-btn" onClick={() => setShowSecurityModal(true)} title="Client security settings"><PaIcon name="security" />Client Security</button>}
+          {canManageClientSecurity && <button type="button" className="crm-action-btn crm-security-btn" onClick={() => clientSecurityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} title="Go to client security settings"><PaIcon name="security" />Client Security</button>}
           <button type="button" className="crm-action-btn crm-support-btn" onClick={() => setShowChatModal(true)} title="Open support chat"><PaIcon name="support" />Client Support</button>
           <button type="button" className="crm-action-btn crm-contact-btn" onClick={() => setCommunicationOpen(true)} title="Email, WhatsApp or call this client">Contact</button>
           {isSuperAdmin && (
@@ -1187,6 +1187,82 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
             </button>
           </div>
           <ClientEmailAccounts client={client} clients={data?.clients || []} />
+        </section>
+      )}
+
+      {canManageClientSecurity && (
+        <section
+          id="client-security-section"
+          ref={clientSecurityRef}
+          className="crm-client-account-panel crm-client-security-profile"
+          aria-labelledby="client-security-heading"
+        >
+          <div className="crm-client-email-accounts-heading">
+            <div>
+              <h3 id="client-security-heading">Client Security</h3>
+              <p>Manage the client’s portal password and sign-in access.</p>
+            </div>
+          </div>
+          <div className="crm-client-security-profile-grid">
+            <div className="crm-field-group">
+              <label htmlFor="client-portal-login-email">Portal username / login email</label>
+              <input
+                id="client-portal-login-email"
+                className="crm-input"
+                type="email"
+                value={client.email || ''}
+                readOnly
+              />
+            </div>
+            <div className="crm-field-group">
+              <label htmlFor="client-current-portal-password">Current portal password</label>
+              <div className="crm-client-security-password">
+                <input
+                  id="client-current-portal-password"
+                  className="crm-input"
+                  type={showClientPassword ? 'text' : 'password'}
+                  value={liveClientPassword}
+                  readOnly
+                  placeholder="No password set"
+                />
+                <button
+                  className="crm-small-btn"
+                  type="button"
+                  onClick={() => setShowClientPassword((visible) => !visible)}
+                  disabled={!liveClientPassword}
+                >
+                  {showClientPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {passwordLoading && <small>Loading saved password…</small>}
+              {passwordLoadError && <small role="alert">{passwordLoadError}</small>}
+              {!passwordLoading && !passwordLoadError && !liveClientPassword && (
+                <small>No password is set. Create one below to enable portal sign-in.</small>
+              )}
+            </div>
+            <div className="crm-field-group crm-client-security-new-password">
+              <label htmlFor="client-new-portal-password">Set a new portal password</label>
+              <div className="crm-client-security-password">
+                <input
+                  id="client-new-portal-password"
+                  className="crm-input"
+                  type="password"
+                  value={passwordInput}
+                  placeholder="Enter a new password"
+                  onChange={(event) => setPasswordInput(event.target.value)}
+                  autoComplete="new-password"
+                />
+                <button
+                  className="crm-small-btn"
+                  type="button"
+                  onClick={handleSetClientPassword}
+                  disabled={!passwordInput.trim()}
+                >
+                  Save Password
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
       )}
 
@@ -1449,47 +1525,6 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
             </div>
             <div className="crm-comment-input-actions crm-inline-ec035d0d30" >
               <button className="crm-post-comment-btn" onClick={handclientdAppointment} disabled={appointmentSaving || !appointmentDate || !appointmentTime || !appointmentTitle.trim()}>{appointmentSaving ? 'Saving…' : 'Save Appointment'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {canManageClientSecurity && showSecurityModal && (
-        <div className="crm-modal-overlay" onClick={() => setShowSecurityModal(false)}>
-          <div className="crm-modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="crm-modal-header">
-              <h3>Client Security - {client.firstName} {client.lastName}</h3>
-              <button className="crm-small-btn" onClick={() => setShowSecurityModal(false)}>Close</button>
-            </div>
-            <div className="crm-field-group crm-inline-72d6c38e5f" >
-              <label>Current Password</label>
-              <div className="crm-inline-9484aff0bd">
-                <input
-                  className="crm-input crm-inline-ee3d55bf99"
-                  type={showClientPassword ? 'text' : 'password'}
-                  value={liveClientPassword}
-                  readOnly
-                  placeholder="Not set"
-
-                />
-                <button
-                  className="crm-small-btn"
-                  type="button"
-                  onClick={() => setShowClientPassword((prev) => !prev)}
-                >
-                  {showClientPassword ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              {passwordLoading && <small>Loading saved password…</small>}
-              {passwordLoadError && <small role="alert">{passwordLoadError}</small>}
-              {!passwordLoading && !passwordLoadError && !liveClientPassword && <small>No recoverable password is saved. Set a new password to enable viewing.</small>}
-            </div>
-            <div className="crm-field-group crm-inline-72d6c38e5f" >
-              <label>New Password</label>
-              <input className="crm-input" type="text" value={passwordInput} placeholder="Enter new password" onChange={(e) => setPasswordInput(e.target.value)} autoComplete="off" />
-            </div>
-            <div className="crm-row crm-inline-13862e6b2a" >
-              <button className="crm-small-btn" onClick={handleSetClientPassword} disabled={!passwordInput.trim()}>Save Password</button>
             </div>
           </div>
         </div>

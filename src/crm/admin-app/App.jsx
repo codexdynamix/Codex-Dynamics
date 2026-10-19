@@ -215,7 +215,8 @@ function RolePage({ data, dataLoading, role, setClientAssignment, assignOfficeMa
     && capabilities.create_agent !== false
     && (role !== ROLE.TEAM_LEAD || Boolean(user?.teamId));
   const canUploadClient = capabilitiesLoaded && capabilities.client_upload !== false;
-  const canManageClientSecurity = capabilitiesLoaded && capabilities.security !== false;
+  const canManageClientSecurity = role === ROLE.SUPER_ADMIN
+    || (capabilitiesLoaded && capabilities.security !== false);
   const canUseChat = capabilitiesLoaded && capabilities.chat !== false;
   const canUseNotifications = capabilitiesLoaded && capabilities.notifications !== false;
 
