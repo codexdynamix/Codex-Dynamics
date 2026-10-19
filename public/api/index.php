@@ -69,7 +69,12 @@ class MongoService {
 
         try {
             self::$client = new MongoDB\Client($uri, [], ['serverSelectionTimeoutMS' => 4000]);
-            self::$client->selectDatabase($dbName)->command(['ping' => 1]);
+            self::$client->selectDatabase($dbName)
+                ->selectCollection('clients')
+                ->createIndex(
+                    ['is_bin' => 1, 'deleted_at' => 1, '_id' => -1],
+                    ['name' => 'clients_visibility_sort']
+                );
         } catch (Throwable $e) {
             error_log('[MongoService] Could not connect to the configured MongoDB database.');
             jsonOut(['ok' => false, 'error' => 'MongoDB is unavailable.'], 503);
@@ -88,10 +93,11 @@ class MongoService {
         return self::$databaseName;
     }
 
-    public static function getCollection(string $name, array $filter = [], int $limit = 200, int $skip = 0, array $sort = []): array {
+    public static function getCollection(string $name, array $filter = [], int $limit = 200, int $skip = 0, array $sort = [], array $projection = []): array {
         $col = self::$client->selectDatabase(self::$databaseName)->selectCollection($name);
         $options = ['limit' => $limit, 'skip' => $skip];
         if ($sort) $options['sort'] = $sort;
+        if ($projection) $options['projection'] = $projection;
         $cursor = $col->find($filter, $options);
         $results = [];
         foreach ($cursor as $doc) {
@@ -1200,9 +1206,60 @@ if ($path === '/admin/clients' && $method === 'GET') {
             ]],
         ]];
     }
-    $limit = min(max((int)($_GET['limit'] ?? 500), 1), 1000);
+    $limit = min(max((int)($_GET['limit'] ?? 50), 1), 100);
     $offset = max((int)($_GET['offset'] ?? 0), 0);
-    $clients = MongoService::getCollection('clients', $filter, $limit + 1, $offset, ['_id' => -1]);
+    $projection = [];
+    if (($_GET['fields'] ?? '') === 'table') {
+        $projection = array_fill_keys([
+            'id',
+            'name',
+            'firstName',
+            'first_name',
+            'lastName',
+            'last_name',
+            'company',
+            'email',
+            'phone',
+            'country',
+            'country_code',
+            'status',
+            'stage',
+            'funnel',
+            'affiliate',
+            'assignedToOffice',
+            'assigned_office_id',
+            'assignedToTeam',
+            'assigned_team_id',
+            'assignedToTeamLeader',
+            'assigned_team_leader_id',
+            'assignedToAgent',
+            'assigned_agent_id',
+            'assigned_agent_name',
+            'portalEnabled',
+            'portal_enabled',
+            'portalStatus',
+            'portal_status',
+            'assignedBy',
+            'assigned_by',
+            'last_comment_date',
+            'registered_date',
+            'created_at',
+            'createdAt',
+            'updated_at',
+            'deleted_at',
+            'deletedAt',
+            'is_bin',
+            'service',
+            'budget',
+            'timeline',
+            'message',
+            'source',
+            'notes',
+            'enquiry_id',
+            'enquiryId',
+        ], 1);
+    }
+    $clients = MongoService::getCollection('clients', $filter, $limit + 1, $offset, ['_id' => -1], $projection);
     $hasMore = count($clients) > $limit;
     if ($hasMore) array_pop($clients);
     jsonOut([

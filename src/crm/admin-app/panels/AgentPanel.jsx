@@ -10,7 +10,7 @@ import {
 } from '../shared';
 import { useConfirmDialog } from '../components/ConfirmModal/ConfirmModal';
 import { SearchAutocomplete } from '../components/UserChrome.jsx';
-import { searchAdminClients, createUserAppointment } from '../adminApi';
+import { searchAdminClients, createUserAppointment, fetchClientById } from '../adminApi';
 import {
   getAdminMessages, sendAdminMessage, markAdminMessagesRead, getAdminUnreadMessageCounts,
   deleteAdminMessage, clearAdminChat, adminSetClientPassword, getClientPortalPasswordAdmin,
@@ -601,7 +601,9 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
   const [confirmDialog, confirm] = useConfirmDialog();
   const workspacePath = getRoleWorkspacePath(role, currentUser?.id);
   const visibleClients = getRoleScopedClients(data, role, currentUser);
-  const client = visibleClients.find((l) => l.id === clientId);
+  const clientSummary = visibleClients.find((l) => l.id === clientId);
+  const [fullProfileClient, setFullProfileClient] = useState(null);
+  const client = fullProfileClient?.id === clientId ? fullProfileClient : clientSummary;
   const clientSecurityRef = useRef(null);
   const [profileSectionPermissions, setProfileSectionPermissions] = useState({});
   const [profilePermissionsError, setProfilePermissionsError] = useState('');
@@ -638,6 +640,24 @@ function ClientProfilePage({ role, viewingUser, data, setData, updateClient, can
   const [emailAccountsOpen, setEmailAccountsOpen] = useState(false);
   const [isEditingRegistered, setIsEditingRegistered] = useState(false);
   const [registeredDateInput, setRegisteredDateInput] = useState('');
+
+  useEffect(() => {
+    if (!clientId || !clientSummary) return undefined;
+    let active = true;
+    fetchClientById(clientId)
+      .then((fullClient) => {
+        if (!active || !fullClient) return;
+        setFullProfileClient(fullClient);
+        setData((prev) => ({
+          ...prev,
+          clients: prev.clients.map((item) => item.id === fullClient.id ? { ...item, ...fullClient } : item),
+        }));
+      })
+      .catch((error) => {
+        if (active) showNotification(error?.message || 'Could not load full client profile.');
+      });
+    return () => { active = false; };
+  }, [clientId, clientSummary?.id]);
 
   useEffect(() => {
     if (client) {

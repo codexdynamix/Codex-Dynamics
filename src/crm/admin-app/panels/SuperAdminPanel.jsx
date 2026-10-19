@@ -48,7 +48,7 @@ import {
   listRecentAuditLog,
   deleteProfileHistoryEntryApi, clearProfileHistoryApi,
   importClientsApi, bulkUpdateClientstatusApi, cleanupBinApi, purgeBinClients,
-  sendHeartbeat,
+  sendHeartbeat, fetchClientById,
   searchAdminClients,
 } from '../adminApi';
 import { fetchAdminSettings } from '../../platformDefaults';
@@ -2168,10 +2168,24 @@ function RecycleBin({ data, setData, showNotification }) {
 function SuperAdminPanel({ data, currentUser, setData, assignOfficeManager, createOfficeWithManager, createStandaloneOfficeManager, createTeamLeader, createStandaloneTeamLeader, createAgent, toggleStaffBlocked, setClientAssignment, setUserLoginState, createClient, showNotification }) {
   const navigate = useNavigate();
   const [activeProfileClient, setActiveProfileClient] = useState(null);
+  const profileLoadRequest = useRef(0);
   const openClientProfile = (client) => {
     setActiveProfileClient(client);
+    const requestId = ++profileLoadRequest.current;
+    fetchClientById(client.id)
+      .then((fullClient) => {
+        if (requestId === profileLoadRequest.current && fullClient) {
+          setActiveProfileClient((current) => current?.id === client.id ? fullClient : current);
+        }
+      })
+      .catch((error) => {
+        if (requestId === profileLoadRequest.current) {
+          showNotification(error?.message || 'Could not load full client profile.');
+        }
+      });
   };
   const closeClientProfile = () => {
+    profileLoadRequest.current += 1;
     setActiveProfileClient(null);
   };
   const [activeProfileStaff, setActiveProfileStaff] = useState(null);

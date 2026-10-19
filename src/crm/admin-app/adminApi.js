@@ -282,8 +282,25 @@ export async function uploadAdminSiteImage(payload) {
 }
 
 export async function listAdminClients(options = {}) {
-  const result = await listClients({ ...options, limit: options.limit || 50 });
-  return { clients: result.clients, total: result.total, hasMore: result.hasMore };
+  const requestedLimit = Math.min(Math.max(Number(options.limit) || 500, 1), 1000);
+  let offset = Math.max(Number(options.offset) || 0, 0);
+  let total = null;
+  let hasMore = false;
+  const clients = [];
+  while (clients.length < requestedLimit) {
+    const result = await listClients({
+      ...options,
+      limit: Math.min(requestedLimit - clients.length, 100),
+      offset,
+    });
+    const batch = result.clients || [];
+    clients.push(...batch);
+    offset += batch.length;
+    total = result.total ?? total;
+    hasMore = result.hasMore;
+    if (!hasMore || batch.length === 0) break;
+  }
+  return { clients, total, hasMore };
 }
 
 export async function getAdminChatThreads({ includeArchived = false } = {}) {
@@ -1211,7 +1228,7 @@ function clientWritePayload(updates) {
 
 export async function listClients({
   search, stage, officeId, teamId, agentId,
-  unassignedLevel, includeDeleted,
+  unassignedLevel, includeDeleted, fields,
   limit = 50, offset = 0,
 } = {}) {
   const params = new URLSearchParams();
@@ -1224,6 +1241,7 @@ export async function listClients({
   if (agentId !== undefined && agentId !== null) params.set('agent_id', String(agentId));
   if (unassignedLevel) params.set('unassigned_level', unassignedLevel);
   if (includeDeleted)  params.set('include_deleted', includeDeleted === 'only' ? 'only' : '1');
+  if (fields)          params.set('fields', fields);
   const res = await adminFetch(`/api/admin/clients?${params.toString()}`);
   return {
     clients:   (res.clients || []).map(mapClientRow),

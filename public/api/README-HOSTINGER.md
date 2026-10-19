@@ -56,6 +56,8 @@ public_html/
 
 ## 4. Verify Your Deployment
 
+The CRM client-list API defaults to 50 records per request and caps page size at 100. Table requests use a MongoDB projection for list fields; opening a client profile fetches that record's full details. API initialization idempotently ensures the `clients_visibility_sort` index (`is_bin`, `deleted_at`, `_id`) instead of issuing a separate MongoDB ping before every request.
+
 Open your browser and visit:
 * `https://yourdomain.com/api/healthz`
 It will return:

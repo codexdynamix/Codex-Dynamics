@@ -448,8 +448,8 @@ function App() {
       const [offices, teams, liveResult, deletedResult, staffRows, deletedOffices, deletedTeams, deletedStaff] = await Promise.all([
         listOffices(),
         listTeams(),
-        listClients({ limit: 50, offset: 0 }),
-        isSuperAdmin ? listClients({ includeDeleted: 'only', limit: 50, offset: 0 }) : Promise.resolve({ clients: [] }),
+        listClients({ limit: 50, offset: 0, fields: 'table' }),
+        isSuperAdmin ? listClients({ includeDeleted: 'only', limit: 50, offset: 0, fields: 'table' }) : Promise.resolve({ clients: [] }),
         listStaff(),
         isSuperAdmin ? listOffices({ includeDeleted: 'only' }) : Promise.resolve([]),
         isSuperAdmin ? listTeams({ includeDeleted: 'only' }) : Promise.resolve([]),
@@ -511,11 +511,10 @@ function App() {
         };
       });
 
-      if (liveResult.hasMore && !clientHydrationInProgress.current) {
+      if (!clientHydrationInProgress.current) {
         clientHydrationInProgress.current = true;
-        void fetchAllClients({ offset: liveResult.clients.length })
-          .then(({ clients: remainingClients }) => {
-            const completeClientList = [...(liveResult.clients || []), ...remainingClients];
+        void fetchAllClients({ offset: 0 })
+          .then(({ clients: completeClientList }) => {
             firstPageClientIds.current = new Set(completeClientList.slice(0, 50).map((client) => client.id));
             setData((prev) => {
               const loaded = completeClientList.map((client) =>
@@ -539,17 +538,16 @@ function App() {
           });
       }
 
-      if (isSuperAdmin && deletedResult.hasMore) {
+      if (isSuperAdmin) {
         void fetchAllClients({
           includeDeleted: 'only',
-          offset: deletedResult.clients.length,
+          offset: 0,
         }).then(({ clients: remainingDeletedClients }) => {
           setData((prev) => ({
             ...prev,
-            deletedClients: [
-              ...(deletedResult.clients || []),
-              ...remainingDeletedClients,
-            ].map((client) => normalizeClientAssignment(client, prev.users, prev.teams)),
+            deletedClients: remainingDeletedClients.map((client) =>
+              normalizeClientAssignment(client, prev.users, prev.teams)
+            ),
           }));
         }).catch((error) => {
           console.warn('[App] background recycle-bin hydration failed', error);
@@ -594,13 +592,14 @@ function App() {
       if (!getAdminToken()) return;
       const refreshStartedAt = Date.now();
       try {
-        const liveResult = await listClients({ limit: 50, offset: 0 });
+        const liveResult = await listClients({ limit: 50, offset: 0, fields: 'table' });
         if (refreshStartedAt < lastClientCreateAt.current) return;
         const previouslyLoadedFirstPage = firstPageClientIds.current;
         firstPageClientIds.current = new Set((liveResult.clients || []).map((client) => client.id));
         setData((prev) => {
+          const previousClients = new Map(prev.clients.map((client) => [client.id, client]));
           const normalizedClients = (liveResult.clients || []).map((client) =>
-            normalizeClientAssignment(client, prev.users, prev.teams)
+            normalizeClientAssignment({ ...previousClients.get(client.id), ...client }, prev.users, prev.teams)
           );
           const retainedClients = prev.clients.filter((client) =>
             !previouslyLoadedFirstPage.has(client.id)
