@@ -10,7 +10,7 @@ import {
 } from './seedData.ts';
 
 export interface MongoCollection<T = any> {
-  find(filter?: any, options?: { sort?: any; limit?: number; skip?: number }): Promise<T[]>;
+  find(filter?: any, options?: { sort?: any; limit?: number; skip?: number; projection?: any }): Promise<T[]>;
   findOne(filter: any): Promise<T | null>;
   insertOne(doc: T): Promise<{ insertedId: string; acknowledged: boolean }>;
   insertMany(docs: T[]): Promise<{ insertedIds: Record<number, string>; acknowledged: boolean }>;
@@ -24,8 +24,9 @@ export interface MongoCollection<T = any> {
 class MongoCollectionAdapter<T = any> implements MongoCollection<T> {
   constructor(private readonly collection: any) {}
 
-  async find(filter: any = {}, options: { sort?: any; limit?: number; skip?: number } = {}): Promise<T[]> {
+  async find(filter: any = {}, options: { sort?: any; limit?: number; skip?: number; projection?: any } = {}): Promise<T[]> {
     let cursor = this.collection.find(filter);
+    if (options.projection) cursor = cursor.project(options.projection);
     if (options.sort) cursor = cursor.sort(options.sort);
     if (options.skip) cursor = cursor.skip(options.skip);
     if (options.limit) cursor = cursor.limit(options.limit);
@@ -82,6 +83,10 @@ export async function initMongo(): Promise<void> {
   try {
     await client.connect();
     const db = client.db(dbName);
+    await db.collection('clients').createIndex(
+      { is_bin: 1, deleted_at: 1, _id: -1 },
+      { name: 'clients_visibility_sort' },
+    );
     const collectionsToCheck = [
       ['blogs', SEED_BLOGS],
       ['reviews', SEED_REVIEWS],

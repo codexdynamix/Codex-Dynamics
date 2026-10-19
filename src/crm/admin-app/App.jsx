@@ -448,8 +448,8 @@ function App() {
       const [offices, teams, liveResult, deletedResult, staffRows, deletedOffices, deletedTeams, deletedStaff] = await Promise.all([
         listOffices(),
         listTeams(),
-        listClients({ limit: 500, offset: 0 }),
-        isSuperAdmin ? listClients({ includeDeleted: 'only', limit: 500, offset: 0 }) : Promise.resolve({ clients: [] }),
+        listClients({ limit: 50, offset: 0 }),
+        isSuperAdmin ? listClients({ includeDeleted: 'only', limit: 50, offset: 0 }) : Promise.resolve({ clients: [] }),
         listStaff(),
         isSuperAdmin ? listOffices({ includeDeleted: 'only' }) : Promise.resolve([]),
         isSuperAdmin ? listTeams({ includeDeleted: 'only' }) : Promise.resolve([]),
@@ -516,7 +516,7 @@ function App() {
         void fetchAllClients({ offset: liveResult.clients.length })
           .then(({ clients: remainingClients }) => {
             const completeClientList = [...(liveResult.clients || []), ...remainingClients];
-            firstPageClientIds.current = new Set(completeClientList.slice(0, 500).map((client) => client.id));
+            firstPageClientIds.current = new Set(completeClientList.slice(0, 50).map((client) => client.id));
             setData((prev) => {
               const loaded = completeClientList.map((client) =>
                 normalizeClientAssignment(client, prev.users, prev.teams)
@@ -594,7 +594,7 @@ function App() {
       if (!getAdminToken()) return;
       const refreshStartedAt = Date.now();
       try {
-        const liveResult = await listClients({ limit: 500, offset: 0 });
+        const liveResult = await listClients({ limit: 50, offset: 0 });
         if (refreshStartedAt < lastClientCreateAt.current) return;
         const previouslyLoadedFirstPage = firstPageClientIds.current;
         firstPageClientIds.current = new Set((liveResult.clients || []).map((client) => client.id));

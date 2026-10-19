@@ -282,7 +282,7 @@ export async function uploadAdminSiteImage(payload) {
 }
 
 export async function listAdminClients(options = {}) {
-  const result = await listClients({ ...options, limit: options.limit || 500 });
+  const result = await listClients({ ...options, limit: options.limit || 50 });
   return { clients: result.clients, total: result.total, hasMore: result.hasMore };
 }
 
@@ -637,7 +637,7 @@ export async function markAdminNotificationRead(id) {
 
 /** Load clients in bounded pages so large workspaces avoid oversized responses. */
 export async function fetchAllClients(options = {}) {
-  const pageSize = 500;
+  const pageSize = 250;
   let offset = Math.max(Number(options.offset) || 0, 0);
   const all = [];
   for (let page = 0; page < 200; page += 1) {
@@ -1212,7 +1212,7 @@ function clientWritePayload(updates) {
 export async function listClients({
   search, stage, officeId, teamId, agentId,
   unassignedLevel, includeDeleted,
-  limit = 500, offset = 0,
+  limit = 50, offset = 0,
 } = {}) {
   const params = new URLSearchParams();
   params.set('limit',  String(limit));
