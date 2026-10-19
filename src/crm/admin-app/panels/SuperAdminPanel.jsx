@@ -49,11 +49,11 @@ import {
   deleteProfileHistoryEntryApi, clearProfileHistoryApi,
   importClientsApi, bulkUpdateClientstatusApi, cleanupBinApi, purgeBinClients,
   sendHeartbeat, fetchClientById,
-  searchAdminClients,
+  searchAdminClients, listClients,
 } from '../adminApi';
 import { fetchAdminSettings } from '../../platformDefaults';
 import { getClientProfilePath } from '../clientProfileRouting';
-import { matchesClientOwnershipFilter, matchesStaffStructureFilter } from '../clientOwnership';
+import { matchesStaffStructureFilter } from '../clientOwnership';
 import { normalizeCsvHeader, parseCsvRows } from '../csvUtils';
 const createLogAdminAction = (setAuditLog) => (admin, action, details, clientName = '') => {
   if (typeof setAuditLog === 'function') {
@@ -102,6 +102,12 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
   const [binPage, setBinPage] = useState(1);
   const pageSize = 20;
   const [view, setView] = useState('active'); // 'active' | 'bin'
+  const [tableClients, setTableClients] = useState([]);
+  const [tableHasMore, setTableHasMore] = useState(false);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [tableError, setTableError] = useState('');
+  const tableRequestId = useRef(0);
+  const tableClientCache = useRef(new Map());
 
   // Bulk selection & assignment state
   const [selected, setSelected] = useState([]);
@@ -114,6 +120,12 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
   const [shuffleScope, setShuffleScope] = useState('agents'); // 'offices' | 'teams' | 'agents'
   const [shuffleTargets, setShuffleTargets] = useState([]); // array of ids
   const [shuffleStatus, setShuffleStatus] = useState(''); // optional pre-filter
+  const getSelectedClientRows = () => {
+    const rowsById = new Map(data.clients.map((client) => [client.id, client]));
+    tableClientCache.current.forEach((client, id) => rowsById.set(id, client));
+    tableClients.forEach((client) => rowsById.set(client.id, client));
+    return selected.map((id) => rowsById.get(id)).filter(Boolean);
+  };
 
   // Client profile modal state
   const [profileClient, setProfileClient] = useState(null);
@@ -251,7 +263,7 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
     });
     if (!ok) return;
     const now = new Date().toISOString();
-    const toDelete = data.clients.filter(l => selected.includes(l.id));
+    const toDelete = getSelectedClientRows();
     setData(prev => ({
       ...prev,
       clients: prev.clients.filter(l => !selected.includes(l.id)),
@@ -292,7 +304,7 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
       tone: 'danger',
     });
     if (!ok) return;
-    const toDelete = data.clients.filter(l => selected.includes(l.id));
+    const toDelete = getSelectedClientRows();
     setData(prev => ({
       ...prev,
       clients: prev.clients.filter(l => !selected.includes(l.id)),
@@ -629,6 +641,17 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
       .finally(() => { setProfileHistoryLoading(false); });
   };
 
+  const openEditClient = async (client) => {
+    try {
+      const fullClient = await fetchClientById(client.id);
+      if (!fullClient) throw new Error('Client record was not returned.');
+      setEditingClient(fullClient);
+    } catch (error) {
+      console.error('[SuperAdminPanel] Failed to load client for editing.', error);
+      showNotification(error?.message || 'Could not load the full client record.');
+    }
+  };
+
   const closeProfile = () => {
     setProfileClient(null);
     setProfileHistory([]);
@@ -807,29 +830,55 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
     return allClients.filter(l => l.id && String(l.id).toLowerCase().includes(q)).slice(0, 10);
   }, [idLookupQuery, data.clients, data.deletedClients]);
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return data.clients.filter(client => {
-      if (showUnassignedOnly && !matchesClientOwnershipFilter(client, 'unassigned')) return false;
-      if (filterOffice && client.assignedToOffice !== filterOffice) return false;
-      if (filterTeam && client.assignedToTeam !== filterTeam) return false;
-      if (filterAgent && client.assignedToAgent !== filterAgent) return false;
-      if (filterTeamLeader && client.assignedToTeamLeader !== filterTeamLeader) return false;
-      if (filterOwnership && !matchesClientOwnershipFilter(client, filterOwnership)) return false;
-      if (filterStatus && normalizeStage(client.stage) !== filterStatus) return false;
-      if (q && !(
-        (client.firstName || '').toLowerCase().includes(q) ||
-        (client.lastName || '').toLowerCase().includes(q) ||
-        (client.email || '').toLowerCase().includes(q) ||
-        (client.phone || '').toLowerCase().includes(q) ||
-        (client.country || '').toLowerCase().includes(q)
-      )) return false;
-      return true;
-    });
-  }, [data.clients, search, filterOffice, filterTeam, filterAgent, filterTeamLeader, filterOwnership, filterStatus, showUnassignedOnly]);
+  useEffect(() => {
+    if (view !== 'active') return undefined;
+    const requestId = ++tableRequestId.current;
+    let active = true;
+    const debounceId = window.setTimeout(() => {
+      setTableLoading(true);
+      setTableError('');
+      listClients({
+        search,
+        officeId: filterOffice,
+        teamId: filterTeam,
+        teamLeaderId: filterTeamLeader,
+        agentId: filterAgent,
+        ownership: filterOwnership,
+        unassignedOnly: showUnassignedOnly,
+        stage: filterStatus,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+        fields: 'table',
+      }).then((result) => {
+        if (!active || requestId !== tableRequestId.current) return;
+        if (page > 1 && result.clients.length === 0) {
+          setPage((currentPage) => Math.max(1, currentPage - 1));
+          return;
+        }
+        result.clients.forEach((client) => tableClientCache.current.set(client.id, client));
+        setTableClients(result.clients || []);
+        setTableHasMore(result.hasMore);
+      }).catch((error) => {
+        if (!active || requestId !== tableRequestId.current) return;
+        setTableClients([]);
+        setTableHasMore(false);
+        setTableError(error.message || 'Client records could not be loaded.');
+      }).finally(() => {
+        if (active && requestId === tableRequestId.current) setTableLoading(false);
+      });
+    }, search.trim() ? 250 : 0);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+    return () => {
+      active = false;
+      window.clearTimeout(debounceId);
+    };
+  }, [
+    view, search, filterOffice, filterTeam, filterTeamLeader, filterAgent,
+    filterOwnership, showUnassignedOnly, filterStatus, page, data.clients,
+  ]);
+
+  const paged = tableClients;
+  const totalPages = Math.max(1, page + (tableHasMore ? 1 : 0));
 
   const deletedClients = data.deletedClients || [];
   const binTotalPages = Math.max(1, Math.ceil(deletedClients.length / pageSize));
@@ -1485,12 +1534,15 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
           )}
 
           <div className="crm-inline-2b759092af">
-            Click any row to open the client profile. Showing {paged.length} of {filtered.length} clients (page {page}/{totalPages})
+            Click any row to open the client profile. Showing {paged.length} clients on page {page}{tableHasMore ? ' · more available' : ''}
+            {tableLoading && ' · loading'}
+            {tableError && <span role="alert"> · {tableError}</span>}
           </div>
 
           <ClientManagementTable
             data={data}
             clients={paged}
+            loading={tableLoading}
             selected={selected}
             onTogglePage={(checked) => {
               if (checked) setSelected([...new Set([...selected, ...paged.map((client) => client.id)])]);
@@ -1502,7 +1554,7 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
             onOpenClient={openProfile}
             onStatusChange={handleClientstatusChange}
             onEnterPortal={enterClientAccount}
-            onEditClient={setEditingClient}
+            onEditClient={openEditClient}
             onMoveToBin={deleteClient}
             page={page}
             totalPages={totalPages}

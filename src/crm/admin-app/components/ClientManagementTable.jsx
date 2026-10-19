@@ -13,6 +13,7 @@ function getLastActivityLabel(client) {
 export default function ClientManagementTable({
   data,
   clients,
+  loading = false,
   selected,
   onTogglePage,
   onToggleClient,
@@ -48,7 +49,7 @@ export default function ClientManagementTable({
           </thead>
           <tbody>
             {clients.length === 0 ? (
-              <tr><td colSpan={8} className="crm-inline-69d13600ed">No clients match your filters.</td></tr>
+              <tr><td colSpan={8} className="crm-inline-69d13600ed">{loading ? 'Loading clients…' : 'No clients match your filters.'}</td></tr>
             ) : clients.map((client) => {
               const isSelected = selected.includes(client.id);
               const lastActivity = getLastActivityLabel(client);

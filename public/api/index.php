@@ -69,20 +69,21 @@ class MongoService {
 
         try {
             self::$client = new MongoDB\Client($uri, [], ['serverSelectionTimeoutMS' => 4000]);
-            self::$client->selectDatabase($dbName)
-                ->selectCollection('clients')
-                ->createIndex(
-                    ['is_bin' => 1, 'deleted_at' => 1, '_id' => -1],
-                    ['name' => 'clients_visibility_sort']
-                );
         } catch (Throwable $e) {
             error_log('[MongoService] Could not connect to the configured MongoDB database.');
             jsonOut(['ok' => false, 'error' => 'MongoDB is unavailable.'], 503);
         }
     }
 
-    public static function isConnected(): bool {
-        return self::$client !== null;
+    public static function ping(): bool {
+        if (self::$client === null) return false;
+        try {
+            self::$client->selectDatabase(self::$databaseName)->command(['ping' => 1]);
+            return true;
+        } catch (Throwable $error) {
+            error_log('[MongoService] MongoDB health check failed.');
+            return false;
+        }
     }
 
     public static function isExtensionActive(): bool {
@@ -439,6 +440,9 @@ function adminSessionIdentityFromRequest(): ?array {
 }
 
 function chatStaffFromRequest(): array {
+    static $cachedStaff = null;
+    if ($cachedStaff !== null) return $cachedStaff;
+
     $identity = adminSessionIdentityFromRequest();
     if ($identity === null) {
         jsonOut(['ok' => false, 'error' => 'A valid staff session is required.'], 401);
@@ -451,7 +455,8 @@ function chatStaffFromRequest(): array {
     if (!$staff || ($staff['status'] ?? '') === 'Suspended' || !empty($staff['deleted_at']) || ($staff['is_bin'] ?? false) === true) {
         jsonOut(['ok' => false, 'error' => 'The staff account is unavailable.'], 401);
     }
-    return $staff;
+    $cachedStaff = $staff;
+    return $cachedStaff;
 }
 
 function requireChatSuperAdminFromRequest(): array {
@@ -731,15 +736,16 @@ function buildClientIdentityReviews(array $clients, array $savedReviews): array 
 
 // Health check
 if ($path === '/healthz') {
+    $connected = MongoService::ping();
     jsonOut([
-        'ok' => true,
+        'ok' => $connected,
         'storage' => 'mongodb',
         'database' => MongoService::getDatabaseName(),
         'php_mongodb_extension' => MongoService::isExtensionActive(),
-        'connected' => MongoService::isConnected(),
+        'connected' => $connected,
         'php_version' => PHP_VERSION,
         'timestamp' => date('c'),
-    ]);
+    ], $connected ? 200 : 503);
 }
 
 // 1. Public Content
@@ -1111,6 +1117,31 @@ if ($path === '/admin/sessions' && $method === 'DELETE') {
 }
 
 // 3. Admin Clients
+if (str_starts_with($path, '/admin/clients')) {
+    chatStaffFromRequest();
+}
+
+function clientListAssignedFields(array $fields): array {
+    return ['$or' => array_map(
+        static fn(string $field): array => [$field => ['$exists' => true, '$nin' => [null, '']]],
+        $fields
+    )];
+}
+
+function clientListUnassignedFields(array $fields): array {
+    return ['$nor' => array_map(
+        static fn(string $field): array => [$field => ['$exists' => true, '$nin' => [null, '']]],
+        $fields
+    )];
+}
+
+function clientListFieldMatch(array $fields, string $value): array {
+    return ['$or' => array_map(
+        static fn(string $field): array => [$field => $value],
+        $fields
+    )];
+}
+
 function clientAssignmentUpdates(array $source): array {
     $aliases = [
         'assignedToOffice' => ['assigned_office_id', 'assignedToOffice', 'officeId'],
@@ -1197,15 +1228,55 @@ if ($path === '/admin/clients' && $method === 'GET') {
             ['deleted_at' => ['$exists' => true, '$nin' => [null, '']]],
         ]];
     } else {
-        $filter = ['$and' => [
-            ['is_bin' => ['$ne' => true]],
-            ['$or' => [
-                ['deleted_at' => ['$exists' => false]],
-                ['deleted_at' => null],
-                ['deleted_at' => ''],
-            ]],
-        ]];
+        $filter = [
+            'is_bin' => ['$in' => [false, null]],
+            'deleted_at' => ['$in' => [null, '']],
+        ];
     }
+
+    $search = substr(trim((string)($_GET['search'] ?? '')), 0, 120);
+    $stage = trim((string)($_GET['stage'] ?? ''));
+    $officeId = trim((string)($_GET['office_id'] ?? ''));
+    $teamId = trim((string)($_GET['team_id'] ?? ''));
+    $teamLeaderId = trim((string)($_GET['team_leader_id'] ?? ''));
+    $agentId = trim((string)($_GET['agent_id'] ?? ''));
+    $ownership = trim((string)($_GET['ownership'] ?? ''));
+    $clauses = [$filter];
+    if ($search !== '') {
+        $pattern = preg_quote($search, '/');
+        $clauses[] = ['$or' => array_map(
+            static fn(string $field): array => [$field => ['$regex' => $pattern, '$options' => 'i']],
+            ['name', 'first_name', 'firstName', 'last_name', 'lastName', 'email', 'phone', 'country']
+        )];
+    }
+    if ($stage !== '') $clauses[] = ['$or' => [['stage' => $stage], ['status' => $stage]]];
+    if ($officeId !== '') $clauses[] = clientListFieldMatch(['assignedToOffice', 'assigned_office_id', 'officeId', 'office_id'], $officeId);
+    if ($teamId !== '') $clauses[] = clientListFieldMatch(['assignedToTeam', 'assigned_team_id', 'teamId', 'team_id'], $teamId);
+    if ($teamLeaderId !== '') $clauses[] = clientListFieldMatch(['assignedToTeamLeader', 'assigned_team_leader_id', 'teamLeaderId', 'team_leader_id'], $teamLeaderId);
+    if ($agentId !== '') $clauses[] = clientListFieldMatch(['assignedToAgent', 'assigned_agent_id', 'agentId', 'agent_id'], $agentId);
+
+    $officeFields = ['assignedToOffice', 'assigned_office_id', 'officeId', 'office_id'];
+    $teamFields = ['assignedToTeam', 'assigned_team_id', 'teamId', 'team_id'];
+    $leaderFields = ['assignedToTeamLeader', 'assigned_team_leader_id', 'teamLeaderId', 'team_leader_id'];
+    $agentFields = ['assignedToAgent', 'assigned_agent_id', 'agentId', 'agent_id'];
+    if (($_GET['unassigned_only'] ?? '') === '1') {
+        $clauses[] = clientListUnassignedFields([...$officeFields, ...$teamFields, ...$leaderFields, ...$agentFields]);
+    }
+    if ($ownership === 'team-leader-owned') {
+        $clauses[] = clientListAssignedFields($leaderFields);
+    } elseif ($ownership === 'office-only') {
+        $clauses[] = clientListUnassignedFields([...$teamFields, ...$leaderFields, ...$agentFields]);
+        $clauses[] = clientListAssignedFields($officeFields);
+    } elseif ($ownership === 'team-no-agent') {
+        $clauses[] = clientListUnassignedFields($agentFields);
+        $clauses[] = clientListAssignedFields($teamFields);
+    } elseif ($ownership === 'agent-assigned') {
+        $clauses[] = clientListAssignedFields($agentFields);
+    } elseif ($ownership === 'unassigned') {
+        $clauses[] = clientListUnassignedFields([...$officeFields, ...$teamFields, ...$leaderFields, ...$agentFields]);
+    }
+    $filter = ['$and' => $clauses];
+
     $limit = min(max((int)($_GET['limit'] ?? 50), 1), 100);
     $offset = max((int)($_GET['offset'] ?? 0), 0);
     $projection = [];
@@ -1217,7 +1288,37 @@ if ($path === '/admin/clients' && $method === 'GET') {
             'first_name',
             'lastName',
             'last_name',
-            'company',
+            'email',
+            'country',
+            'country_code',
+            'status',
+            'stage',
+            'funnel',
+            'affiliate',
+            'assignedToOffice',
+            'assigned_office_id',
+            'assignedToTeam',
+            'assigned_team_id',
+            'assignedToTeamLeader',
+            'assigned_team_leader_id',
+            'assignedToAgent',
+            'assigned_agent_id',
+            'last_comment_date',
+            'registered_date',
+            'created_at',
+            'createdAt',
+            'deleted_at',
+            'deletedAt',
+            'is_bin',
+        ], 1);
+    } elseif (($_GET['fields'] ?? '') === 'summary') {
+        $projection = array_fill_keys([
+            'id',
+            'name',
+            'firstName',
+            'first_name',
+            'lastName',
+            'last_name',
             'email',
             'phone',
             'country',
@@ -1249,17 +1350,25 @@ if ($path === '/admin/clients' && $method === 'GET') {
             'deleted_at',
             'deletedAt',
             'is_bin',
+            'company',
             'service',
             'budget',
             'timeline',
             'message',
             'source',
             'notes',
+            'comment_history',
+            'commentHistory',
+            'status_history',
+            'statusHistory',
+            'appointments',
             'enquiry_id',
             'enquiryId',
         ], 1);
     }
+    $queryStartedAt = microtime(true);
     $clients = MongoService::getCollection('clients', $filter, $limit + 1, $offset, ['_id' => -1], $projection);
+    header('Server-Timing: mongodb;dur=' . number_format((microtime(true) - $queryStartedAt) * 1000, 2, '.', ''));
     $hasMore = count($clients) > $limit;
     if ($hasMore) array_pop($clients);
     jsonOut([
@@ -1351,24 +1460,29 @@ if (preg_match('#^/admin/client-identity-reviews/([^/]+)/([^/]+)$#', $path, $mat
 }
 
 if (str_starts_with($path, '/admin/clients/search')) {
-    $q = strtolower(trim((string)($_GET['q'] ?? '')));
-    $all = MongoService::getCollection('clients', [
+    $q = substr(trim((string)($_GET['q'] ?? '')), 0, 120);
+    $filter = [
         '$and' => [
-            ['is_bin' => ['$ne' => true]],
-            ['$or' => [
-                ['deleted_at' => ['$exists' => false]],
-                ['deleted_at' => null],
-                ['deleted_at' => ''],
-            ]],
+            ['is_bin' => ['$in' => [false, null]]],
+            ['deleted_at' => ['$in' => [null, '']]],
         ],
-    ]);
-    if ($q === '') {
-        jsonOut(['ok' => true, 'clients' => array_slice($all, 0, 10)]);
+    ];
+    if ($q !== '') {
+        $pattern = preg_quote($q, '/');
+        $filter['$and'][] = ['$or' => array_map(
+            static fn(string $field): array => [$field => ['$regex' => $pattern, '$options' => 'i']],
+            ['id', 'name', 'first_name', 'firstName', 'last_name', 'lastName', 'company', 'email', 'phone', 'country']
+        )];
     }
-    $filtered = array_values(array_filter($all, function($c) use ($q) {
-        return str_contains(strtolower($c['name'] ?? ''), $q) || str_contains(strtolower($c['email'] ?? ''), $q);
-    }));
-    jsonOut(['ok' => true, 'clients' => $filtered]);
+    $limit = min(max((int)($_GET['limit'] ?? 8), 1), 20);
+    $projection = array_fill_keys([
+        'id', 'name', 'firstName', 'first_name', 'lastName', 'last_name',
+        'company', 'email', 'phone', 'country', 'country_code',
+    ], 1);
+    $queryStartedAt = microtime(true);
+    $clients = MongoService::getCollection('clients', $filter, $limit, 0, ['_id' => -1], $projection);
+    header('Server-Timing: mongodb;dur=' . number_format((microtime(true) - $queryStartedAt) * 1000, 2, '.', ''));
+    jsonOut(['ok' => true, 'clients' => $clients]);
 }
 
 if (preg_match('#^/admin/clients/([^/]+)/mailboxes(?:/([^/]+))?$#', $path, $matches)) {

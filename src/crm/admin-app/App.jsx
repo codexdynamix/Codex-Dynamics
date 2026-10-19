@@ -445,37 +445,12 @@ function App() {
     try {
       const storedProfile = getStoredAdminProfile();
       const isSuperAdmin = storedProfile?.role === ROLE.SUPER_ADMIN;
-      const [offices, teams, liveResult, deletedResult, staffRows, deletedOffices, deletedTeams, deletedStaff] = await Promise.all([
+      const [offices, teams, liveResult, staffRows] = await Promise.all([
         listOffices(),
         listTeams(),
-        listClients({ limit: 50, offset: 0, fields: 'table' }),
-        isSuperAdmin ? listClients({ includeDeleted: 'only', limit: 50, offset: 0, fields: 'table' }) : Promise.resolve({ clients: [] }),
+        listClients({ limit: 20, offset: 0, fields: 'table' }),
         listStaff(),
-        isSuperAdmin ? listOffices({ includeDeleted: 'only' }) : Promise.resolve([]),
-        isSuperAdmin ? listTeams({ includeDeleted: 'only' }) : Promise.resolve([]),
-        isSuperAdmin ? listStaff({ includeDeleted: 'only' }) : Promise.resolve([]),
       ]);
-
-      const recycleBin = [
-        ...(deletedOffices || []).map((o) => ({
-          id: o.id,
-          type: 'office',
-          item: o,
-          deletedAt: o.deletedAt || new Date().toISOString(),
-        })),
-        ...(deletedTeams || []).map((t) => ({
-          id: t.id,
-          type: 'team',
-          item: t,
-          deletedAt: t.deletedAt || new Date().toISOString(),
-        })),
-        ...(deletedStaff || []).map((s) => ({
-          id: s.id,
-          type: 'user',
-          item: s,
-          deletedAt: s.deletedAt || new Date().toISOString(),
-        })),
-      ];
 
       if (clientsRequestStartedAt >= lastClientCreateAt.current) {
         firstPageClientIds.current = new Set((liveResult.clients || []).map((client) => client.id));
@@ -496,63 +471,89 @@ function App() {
           : (liveResult.clients || []).map((client) =>
               normalizeClientAssignment(client, mergedUsers, teams)
             );
-        const deletedClients = (deletedResult.clients || []).map((client) =>
-          normalizeClientAssignment(client, mergedUsers, teams)
-        );
-
         return {
           ...prev,
           offices,
           teams,
           clients: normalizedClients,
-          deletedClients,
-          recycleBin,
+          deletedClients: prev.deletedClients || [],
+          recycleBin: prev.recycleBin || [],
           users: mergedUsers,
         };
       });
 
-      if (!clientHydrationInProgress.current) {
-        clientHydrationInProgress.current = true;
-        void fetchAllClients({ offset: 0 })
-          .then(({ clients: completeClientList }) => {
-            firstPageClientIds.current = new Set(completeClientList.slice(0, 50).map((client) => client.id));
-            setData((prev) => {
-              const loaded = completeClientList.map((client) =>
-                normalizeClientAssignment(client, prev.users, prev.teams)
-              );
-              const loadedIds = new Set(loaded.map((client) => client.id));
-              const newlyCreated = prev.clients.filter((client) =>
-                !loadedIds.has(client.id) && lastClientCreateAt.current > clientsRequestStartedAt
-              );
-              return {
-                ...prev,
-                clients: [...loaded, ...newlyCreated],
-              };
-            });
-          })
-          .catch((error) => {
-            console.warn('[App] background client hydration failed', error);
-          })
-          .finally(() => {
-            clientHydrationInProgress.current = false;
-          });
-      }
-
       if (isSuperAdmin) {
-        void fetchAllClients({
-          includeDeleted: 'only',
-          offset: 0,
-        }).then(({ clients: remainingDeletedClients }) => {
+        void Promise.all([
+          fetchAllClients({ includeDeleted: 'only', offset: 0 }),
+          listOffices({ includeDeleted: 'only' }),
+          listTeams({ includeDeleted: 'only' }),
+          listStaff({ includeDeleted: 'only' }),
+        ]).then(([deletedClientResult, deletedOffices, deletedTeams, deletedStaff]) => {
+          const recycleBin = [
+            ...(deletedOffices || []).map((office) => ({
+              id: office.id,
+              type: 'office',
+              item: office,
+              deletedAt: office.deletedAt || new Date().toISOString(),
+            })),
+            ...(deletedTeams || []).map((team) => ({
+              id: team.id,
+              type: 'team',
+              item: team,
+              deletedAt: team.deletedAt || new Date().toISOString(),
+            })),
+            ...(deletedStaff || []).map((staff) => ({
+              id: staff.id,
+              type: 'user',
+              item: staff,
+              deletedAt: staff.deletedAt || new Date().toISOString(),
+            })),
+          ];
           setData((prev) => ({
             ...prev,
-            deletedClients: remainingDeletedClients.map((client) =>
+            deletedClients: (deletedClientResult.clients || []).map((client) =>
               normalizeClientAssignment(client, prev.users, prev.teams)
             ),
+            recycleBin,
           }));
         }).catch((error) => {
           console.warn('[App] background recycle-bin hydration failed', error);
         });
       }
+
+      if (!clientHydrationInProgress.current) {
+        clientHydrationInProgress.current = true;
+        window.setTimeout(() => {
+          if (!getAdminToken()) {
+            clientHydrationInProgress.current = false;
+            return;
+          }
+          void fetchAllClients({ offset: 0 })
+            .then(({ clients: completeClientList }) => {
+              firstPageClientIds.current = new Set(completeClientList.slice(0, 50).map((client) => client.id));
+              setData((prev) => {
+                const loaded = completeClientList.map((client) =>
+                  normalizeClientAssignment(client, prev.users, prev.teams)
+                );
+                const loadedIds = new Set(loaded.map((client) => client.id));
+                const newlyCreated = prev.clients.filter((client) =>
+                  !loadedIds.has(client.id) && lastClientCreateAt.current > clientsRequestStartedAt
+                );
+                return {
+                  ...prev,
+                  clients: [...loaded, ...newlyCreated],
+                };
+              });
+            })
+            .catch((error) => {
+              console.warn('[App] background client hydration failed', error);
+            })
+            .finally(() => {
+              clientHydrationInProgress.current = false;
+            });
+        }, 1000);
+      }
+
     } catch (error) {
       console.error('[App] failed to load admin backend data', error);
     } finally {

@@ -290,6 +290,7 @@ export async function listAdminClients(options = {}) {
   while (clients.length < requestedLimit) {
     const result = await listClients({
       ...options,
+      fields: options.fields || 'summary',
       limit: Math.min(requestedLimit - clients.length, 100),
       offset,
     });
@@ -654,11 +655,11 @@ export async function markAdminNotificationRead(id) {
 
 /** Load clients in bounded pages so large workspaces avoid oversized responses. */
 export async function fetchAllClients(options = {}) {
-  const pageSize = 250;
+  const pageSize = 100;
   let offset = Math.max(Number(options.offset) || 0, 0);
   const all = [];
-  for (let page = 0; page < 200; page += 1) {
-    const result = await listClients({ ...options, limit: pageSize, offset });
+  while (true) {
+    const result = await listClients({ ...options, fields: options.fields || 'summary', limit: pageSize, offset });
     const batch = result.clients || [];
     all.push(...batch);
     if (!result.hasMore || batch.length === 0) break;
@@ -1114,8 +1115,8 @@ function mapClientRow(l) {
       : l[legacyField];
     return value || null;
   };
-  const first = l.first_name || '';
-  const last  = l.last_name  || '';
+  const first = l.first_name || l.firstName || '';
+  const last  = l.last_name  || l.lastName || '';
   const storedComments = Array.isArray(l.comment_history) && l.comment_history.length
     ? l.comment_history
     : (l.commentHistory || l.comment_history || []);
@@ -1147,7 +1148,7 @@ function mapClientRow(l) {
     email:              l.email,
     phone:              l.phone || '',
     country:            l.country || '',
-    countryCode:        l.country_code || '',
+    countryCode:        l.country_code || l.countryCode || '',
     stage:              l.stage,
     status:             l.status || l.stage || 'New',
     funnel:             l.funnel || '',
@@ -1156,11 +1157,14 @@ function mapClientRow(l) {
     assignedToTeam:     assignment('assignedToTeam', 'assigned_team_id'),
     assignedToTeamLeader: assignment('assignedToTeamLeader', 'assigned_team_leader_id'),
     assignedToAgent:    assignment('assignedToAgent', 'assigned_agent_id'),
-    assignedAgentName:  l.assigned_agent_name || null,
-    portalEnabled:      l.portal_enabled == null ? null : Boolean(Number(l.portal_enabled)),
-    portalStatus:       l.portal_status || null,
-    assignedBy:         l.assigned_by || null,
-    lastCommentDate:    l.last_comment_date || lastComment?.date || '',
+    assignedAgentName:  l.assigned_agent_name || l.assignedAgentName || null,
+    portalEnabled:      (() => {
+      const value = l.portal_enabled ?? l.portalEnabled;
+      return value == null ? null : (typeof value === 'boolean' ? value : Boolean(Number(value)));
+    })(),
+    portalStatus:       l.portal_status || l.portalStatus || null,
+    assignedBy:         l.assigned_by || l.assignedBy || null,
+    lastCommentDate:    l.last_comment_date || l.lastCommentDate || lastComment?.date || '',
     registeredDate:     (() => {
       const raw = l.registered_date || l.registeredDate || l.created_at || l.createdAt;
       if (!raw) return new Date().toLocaleDateString();
@@ -1171,9 +1175,9 @@ function mapClientRow(l) {
         return String(raw);
       }
     })(),
-    deletedAt:          l.deleted_at || null,
-    createdAt:          l.created_at,
-    updatedAt:          l.updated_at,
+    deletedAt:          l.deleted_at || l.deletedAt || null,
+    createdAt:          l.created_at || l.createdAt,
+    updatedAt:          l.updated_at || l.updatedAt,
     company:            l.company || '',
     service:            l.service || '',
     budget:             l.budget || '',
@@ -1227,8 +1231,8 @@ function clientWritePayload(updates) {
 }
 
 export async function listClients({
-  search, stage, officeId, teamId, agentId,
-  unassignedLevel, includeDeleted, fields,
+  search, stage, officeId, teamId, teamLeaderId, agentId,
+  ownership, unassignedOnly, unassignedLevel, includeDeleted, fields,
   limit = 50, offset = 0,
 } = {}) {
   const params = new URLSearchParams();
@@ -1238,7 +1242,10 @@ export async function listClients({
   if (stage)           params.set('stage', stage);
   if (officeId)        params.set('office_id', officeId);
   if (teamId)          params.set('team_id', teamId);
+  if (teamLeaderId)    params.set('team_leader_id', teamLeaderId);
   if (agentId !== undefined && agentId !== null) params.set('agent_id', String(agentId));
+  if (ownership)       params.set('ownership', ownership);
+  if (unassignedOnly)  params.set('unassigned_only', '1');
   if (unassignedLevel) params.set('unassigned_level', unassignedLevel);
   if (includeDeleted)  params.set('include_deleted', includeDeleted === 'only' ? 'only' : '1');
   if (fields)          params.set('fields', fields);

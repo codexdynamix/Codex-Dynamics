@@ -106,6 +106,9 @@ function getAdminSessionIdentity(req: Request) {
   };
 }
 async function requireChatStaff(req: Request, res: Response) {
+  const cachedStaff = authenticatedStaffByRequest.get(req);
+  if (cachedStaff) return cachedStaff;
+
   const identity = getAdminSessionIdentity(req);
   if (!identity) {
     res.status(401).json({ ok: false, error: 'A valid staff session is required.' });
@@ -122,6 +125,7 @@ async function requireChatStaff(req: Request, res: Response) {
     res.status(401).json({ ok: false, error: 'The staff account is unavailable.' });
     return null;
   }
+  authenticatedStaffByRequest.set(req, staff);
   return staff;
 }
 async function requireChatSuperAdmin(req: Request, res: Response) {
@@ -143,6 +147,7 @@ const STAFF_CAPABILITY_CATALOG = {
   enquiries: 'Enquiries',
   chat: 'Chat',
 } as const;
+const authenticatedStaffByRequest = new WeakMap<Request, Record<string, any>>();
 const DEFAULT_STAFF_CAPABILITIES = Object.fromEntries(
   Object.keys(STAFF_CAPABILITY_CATALOG).map((key) => [key, true])
 );
@@ -593,18 +598,95 @@ apiRouter.delete('/admin/teams/:id', async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 // 4. CLIENT MANAGEMENT & DISTRIBUTION (CRM)
 // ---------------------------------------------------------------------------
+apiRouter.use('/admin/clients', async (req: Request, res: Response, next) => {
+  try {
+    if (await requireAdminStaff(req, res)) next();
+  } catch (error) {
+    next(error);
+  }
+});
+apiRouter.use('/admin/users', async (req: Request, res: Response, next) => {
+  try {
+    if (await requireAdminStaff(req, res)) next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 function clientDeletionFilter(includeDeleted: unknown): Record<string, unknown> {
   const mode = String(includeDeleted || '');
   if (mode === '1') return {};
   if (mode === 'only') {
     return { $or: [{ is_bin: true }, { deleted_at: { $ne: null } }] };
   }
-  return { $nor: [{ is_bin: true }, { deleted_at: { $ne: null } }] };
+  return {
+    is_bin: { $in: [false, null] },
+    deleted_at: { $in: [null, ''] },
+  };
+}
+
+function clientListFieldMatch(fields: string[], value: string): Record<string, unknown> {
+  return { $or: fields.map((field) => ({ [field]: value })) };
+}
+
+function clientListFieldUnassigned(fields: string[]): Record<string, unknown> {
+  return {
+    $nor: fields.map((field) => ({
+      [field]: { $exists: true, $nin: [null, ''] },
+    })),
+  };
+}
+
+function buildClientListFilter(query: Request['query']): Record<string, unknown> {
+  const clauses: Record<string, unknown>[] = [clientDeletionFilter(query.include_deleted)];
+  const search = String(query.search || '').trim().slice(0, 120);
+  const officeId = String(query.office_id || '').trim();
+  const teamId = String(query.team_id || '').trim();
+  const teamLeaderId = String(query.team_leader_id || '').trim();
+  const agentId = String(query.agent_id || '').trim();
+  const stage = String(query.stage || '').trim();
+  const ownership = String(query.ownership || '');
+
+  if (search) {
+    const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    clauses.push({
+      $or: ['name', 'first_name', 'firstName', 'last_name', 'lastName', 'email', 'phone', 'country']
+        .map((field) => ({ [field]: { $regex: escapedSearch, $options: 'i' } })),
+    });
+  }
+  if (stage) clauses.push({ $or: [{ stage }, { status: stage }] });
+  if (officeId) clauses.push(clientListFieldMatch(['assignedToOffice', 'assigned_office_id', 'officeId', 'office_id'], officeId));
+  if (teamId) clauses.push(clientListFieldMatch(['assignedToTeam', 'assigned_team_id', 'teamId', 'team_id'], teamId));
+  if (teamLeaderId) clauses.push(clientListFieldMatch(['assignedToTeamLeader', 'assigned_team_leader_id', 'teamLeaderId', 'team_leader_id'], teamLeaderId));
+  if (agentId) clauses.push(clientListFieldMatch(['assignedToAgent', 'assigned_agent_id', 'agentId', 'agent_id'], agentId));
+
+  const officeFields = ['assignedToOffice', 'assigned_office_id', 'officeId', 'office_id'];
+  const teamFields = ['assignedToTeam', 'assigned_team_id', 'teamId', 'team_id'];
+  const leaderFields = ['assignedToTeamLeader', 'assigned_team_leader_id', 'teamLeaderId', 'team_leader_id'];
+  const agentFields = ['assignedToAgent', 'assigned_agent_id', 'agentId', 'agent_id'];
+  if (query.unassigned_only === '1') {
+    clauses.push(clientListFieldUnassigned([...officeFields, ...teamFields, ...leaderFields, ...agentFields]));
+  }
+  if (ownership === 'team-leader-owned') {
+    clauses.push({ $or: leaderFields.flatMap((field) => [{ [field]: { $exists: true, $nin: [null, ''] } }]) });
+  } else if (ownership === 'office-only') {
+    clauses.push(clientListFieldUnassigned([...teamFields, ...leaderFields, ...agentFields]));
+    clauses.push({ $or: officeFields.map((field) => ({ [field]: { $exists: true, $nin: [null, ''] } })) });
+  } else if (ownership === 'team-no-agent') {
+    clauses.push(clientListFieldUnassigned(agentFields));
+    clauses.push({ $or: teamFields.map((field) => ({ [field]: { $exists: true, $nin: [null, ''] } })) });
+  } else if (ownership === 'agent-assigned') {
+    clauses.push({ $or: agentFields.map((field) => ({ [field]: { $exists: true, $nin: [null, ''] } })) });
+  } else if (ownership === 'unassigned') {
+    clauses.push(clientListFieldUnassigned([...officeFields, ...teamFields, ...leaderFields, ...agentFields]));
+  }
+
+  return { $and: clauses };
 }
 
 apiRouter.get('/admin/clients', async (req: Request, res: Response) => {
   const collection = getMongoCollection('clients');
-  const filter = clientDeletionFilter(req.query.include_deleted);
+  const filter = buildClientListFilter(req.query);
   const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   const tableProjection = {
@@ -614,7 +696,34 @@ apiRouter.get('/admin/clients', async (req: Request, res: Response) => {
     first_name: 1,
     lastName: 1,
     last_name: 1,
-    company: 1,
+    email: 1,
+    country: 1,
+    country_code: 1,
+    status: 1,
+    stage: 1,
+    assignedToOffice: 1,
+    assigned_office_id: 1,
+    assignedToTeam: 1,
+    assigned_team_id: 1,
+    assignedToTeamLeader: 1,
+    assigned_team_leader_id: 1,
+    assignedToAgent: 1,
+    assigned_agent_id: 1,
+    last_comment_date: 1,
+    registered_date: 1,
+    created_at: 1,
+    createdAt: 1,
+    deleted_at: 1,
+    deletedAt: 1,
+    is_bin: 1,
+  };
+  const summaryProjection = {
+    id: 1,
+    name: 1,
+    firstName: 1,
+    first_name: 1,
+    lastName: 1,
+    last_name: 1,
     email: 1,
     phone: 1,
     country: 1,
@@ -646,21 +755,34 @@ apiRouter.get('/admin/clients', async (req: Request, res: Response) => {
     deleted_at: 1,
     deletedAt: 1,
     is_bin: 1,
+    company: 1,
     service: 1,
     budget: 1,
     timeline: 1,
     message: 1,
     source: 1,
     notes: 1,
+    comment_history: 1,
+    commentHistory: 1,
+    status_history: 1,
+    statusHistory: 1,
+    appointments: 1,
     enquiry_id: 1,
     enquiryId: 1,
   };
+  const projection = req.query.fields === 'table'
+    ? tableProjection
+    : req.query.fields === 'summary'
+      ? summaryProjection
+      : undefined;
+  const queryStartedAt = Date.now();
   const clients = await collection.find(filter, {
     sort: { _id: -1 },
     limit: limit + 1,
     skip: offset,
-    ...(req.query.fields === 'table' ? { projection: tableProjection } : {}),
+    ...(projection ? { projection } : {}),
   });
+  res.setHeader('Server-Timing', `mongodb;dur=${(Date.now() - queryStartedAt).toFixed(2)}`);
   const hasMore = clients.length > limit;
   if (hasMore) clients.pop();
   res.json({
@@ -675,26 +797,41 @@ apiRouter.get('/admin/clients', async (req: Request, res: Response) => {
 });
 
 apiRouter.get('/admin/clients/search', async (req: Request, res: Response) => {
-  const q = String(req.query.q || '').trim();
+  const q = String(req.query.q || '').trim().slice(0, 120);
   const clientsCol = getMongoCollection('clients');
   const activeClients = clientDeletionFilter(undefined);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 8, 1), 20);
+  const projection = {
+    id: 1,
+    name: 1,
+    firstName: 1,
+    first_name: 1,
+    lastName: 1,
+    last_name: 1,
+    company: 1,
+    email: 1,
+    phone: 1,
+    country: 1,
+  };
   if (!q) {
-    const clients = await clientsCol.find(activeClients, { limit: 10 });
+    const queryStartedAt = Date.now();
+    const clients = await clientsCol.find(activeClients, { limit, projection, sort: { _id: -1 } });
+    res.setHeader('Server-Timing', `mongodb;dur=${(Date.now() - queryStartedAt).toFixed(2)}`);
     return res.json({ ok: true, clients });
   }
+  const queryStartedAt = Date.now();
   const clients = await clientsCol.find({
     $and: [
       activeClients,
       {
         $or: [
-          { name: { $regex: q, $options: 'i' } },
-          { company: { $regex: q, $options: 'i' } },
-          { email: { $regex: q, $options: 'i' } },
-          { phone: { $regex: q, $options: 'i' } },
+          ...['id', 'name', 'first_name', 'firstName', 'last_name', 'lastName', 'company', 'email', 'phone', 'country']
+            .map((field) => ({ [field]: { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } })),
         ],
       },
     ],
-  });
+  }, { limit, projection, sort: { _id: -1 } });
+  res.setHeader('Server-Timing', `mongodb;dur=${(Date.now() - queryStartedAt).toFixed(2)}`);
   res.json({ ok: true, clients });
 });
 

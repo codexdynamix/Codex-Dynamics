@@ -56,7 +56,18 @@ public_html/
 
 ## 4. Verify Your Deployment
 
-The CRM client-list API defaults to 50 records per request and caps page size at 100. Table requests use a MongoDB projection for list fields; opening a client profile fetches that record's full details. API initialization idempotently ensures the `clients_visibility_sort` index (`is_bin`, `deleted_at`, `_id`) instead of issuing a separate MongoDB ping before every request.
+The client-management table requests 20 projected rows at a time. Filters and page navigation are applied by MongoDB, and full client details are loaded only when a profile is opened. Client-list and client-search APIs require an authenticated staff session.
+Client-list and search responses include a `Server-Timing: mongodb;dur=...` header so database time can be distinguished from hosting/network latency.
+
+Run the idempotent MongoDB maintenance script once after deploying the API, using Hostinger SSH/CLI with the same MongoDB environment configuration as the site:
+
+```sh
+php public_html/api/bin/optimize-clients.php
+```
+
+It normalizes legacy `is_bin` / `deleted_at` values and ensures the `clients_visibility_sort` compound index. The normal API request path does not create indexes. The migration updates only client visibility fields; it does not delete client records.
+
+The PHP API is still compatible with older visibility values while the maintenance script has not been run. Running the script allows those values to be normalized and the compound index to work consistently for the active-client filter and `_id` ordering.
 
 Open your browser and visit:
 * `https://yourdomain.com/api/healthz`
