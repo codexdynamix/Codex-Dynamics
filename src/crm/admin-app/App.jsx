@@ -603,8 +603,17 @@ function App() {
     };
 
     const initSession = async () => {
+      const cachedAdminId = getStoredAdminProfile()?.id;
       try {
         const freshAdmin = await fetchAdminMe();
+        if (!freshAdmin) {
+          setData((prev) => ({
+            ...prev,
+            users: prev.users.filter((user) => user.id !== cachedAdminId),
+          }));
+          setDataLoading(false);
+          return;
+        }
         const adminUser  = mapAdminToUser(freshAdmin);
         setData((prev) => ({
           ...prev,
@@ -614,6 +623,12 @@ function App() {
       } catch (_) {
         // Token missing or invalid. Do not request protected CRM data before
         // sign-in; addAdminToData loads it after a successful login.
+        if (!getAdminToken()) {
+          setData((prev) => ({
+            ...prev,
+            users: prev.users.filter((user) => user.id !== cachedAdminId),
+          }));
+        }
         setDataLoading(false);
       }
     };

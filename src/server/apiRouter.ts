@@ -407,22 +407,12 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.get('/admin/me', async (_req: Request, res: Response) => {
+apiRouter.get('/admin/me', async (req: Request, res: Response) => {
   try {
-    const staffCol = getMongoCollection('staff_users');
-    const staff = (await staffCol.findOne({
-      role: { $regex: '^super[\\s_-]*admin$', $options: 'i' },
-    })) || {
-      id: 'staff_super_admin',
-      email: 'admin@codexdynamics.com',
-      name: 'Codex Super Admin',
-      role: 'super-admin',
-      officeId: 'off_1',
-      teamId: 'team_1',
-      status: 'Active',
-      capabilities: '["all"]',
-    };
-    res.json({ ok: true, user: staff });
+    const staff = await requireAdminStaff(req, res);
+    if (!staff) return;
+    const { password: _password, password_hash: _passwordHash, ...safeStaff } = staff;
+    res.json({ ok: true, user: safeStaff });
   } catch (error: any) {
     res.status(500).json({ ok: false, error: error.message });
   }

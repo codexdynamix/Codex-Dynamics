@@ -158,7 +158,10 @@ export async function adminLogout() {
  * Validates the stored token and returns a fresh admin profile.
  */
 export async function fetchAdminMe() {
-  if (!getAdminToken()) return null;
+  if (!getAdminToken()) {
+    clearAdminSession();
+    return null;
+  }
   let data;
   try {
     data = await adminFetch('/api/admin/me');

@@ -938,20 +938,8 @@ if ($path === '/admin/password-reset/complete' && $method === 'POST') {
 }
 
 if ($path === '/admin/me') {
-    $adminEmail = strtolower(trim((string)($config['admin_email'] ?? 'admin@codexdynamics.com')));
-    $staff = MongoService::findOne('staff_users', ['email' => $adminEmail]);
-    if (!$staff) {
-        $staff = [
-            'id' => 'staff_super_admin',
-            'email' => $adminEmail,
-            'name' => 'Codex Super Admin',
-            'role' => 'super-admin',
-            'officeId' => 'off_1',
-            'teamId' => 'team_1',
-            'status' => 'Active',
-            'capabilities' => '["all"]',
-        ];
-    }
+    $staff = chatStaffFromRequest();
+    unset($staff['password'], $staff['password_hash'], $staff['password_reset_token']);
     jsonOut(['ok' => true, 'user' => $staff]);
 }
 
