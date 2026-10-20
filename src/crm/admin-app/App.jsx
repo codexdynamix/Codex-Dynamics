@@ -309,10 +309,43 @@ function RolePage({ data, dataLoading, role, setClientAssignment, assignOfficeMa
 function BackofficeLanding() {
   const navigate = useNavigate();
   const { config } = useSiteConfig();
+  const [checkingSession, setCheckingSession] = useState(() => Boolean(getAdminToken()));
   const name = config.siteName || 'Codex Dynamics';
   const [first, ...rest] = (name || 'Codex Dynamics').split(/[- / \s]+/);
   const second = rest.join(' ') || 'Dynamics';
   const initial = name.trim().charAt(0).toUpperCase() || 'C';
+
+  useEffect(() => {
+    if (!getAdminToken()) return undefined;
+    let active = true;
+    const restoreWorkspace = async () => {
+      try {
+        const admin = await fetchAdminMe();
+        if (!active || !admin?.id) return;
+        const rolePath = {
+          [ROLE.SUPER_ADMIN]: 'super-admin',
+          [ROLE.OFFICE_MANAGER]: 'office-manager',
+          [ROLE.TEAM_LEAD]: 'team-leader',
+          [ROLE.AGENT]: 'agent',
+        }[mapAdminToUser(admin).role];
+        if (rolePath) {
+          navigate(`/admin/${rolePath}/${encodeURIComponent(admin.id)}`, { replace: true });
+        }
+      } catch (error) {
+        console.warn('[BackofficeLanding] session restore failed', error);
+      } finally {
+        if (active) setCheckingSession(false);
+      }
+    };
+    restoreWorkspace();
+    return () => {
+      active = false;
+    };
+  }, [navigate]);
+
+  if (checkingSession) {
+    return <div className="crm-inline-0e55b72440">Restoring your CRM session…</div>;
+  }
 
   const portals = [
     { to: '/admin/login/super-admin',    icon: Crown, title: 'Super Admin',    desc: 'Full system governance: offices, teams, staff & clients', accent: '#FF9F0A' },
