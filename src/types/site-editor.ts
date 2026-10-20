@@ -114,6 +114,7 @@ export interface HeaderSocialsConfig {
 
 export interface SiteConfig {
   siteName: string;
+  textOverrides?: Record<string, string>;
   siteTagline?: string;
   badgeText?: string;
   copyrightYear: string;
@@ -322,6 +323,7 @@ export interface TidioSettings {
 
 export const DEFAULT_SITE_CONFIG: SiteConfig = {
   siteName: "Codex Dynamics",
+  textOverrides: {},
   copyrightYear: "2026",
   formSubmitEmail: "codexdynamix@gmail.com",
 

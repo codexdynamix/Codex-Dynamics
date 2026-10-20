@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useMemo, useCall
 import { DEFAULT_SITE_CONFIG, type SiteConfig, type SocialContact, type AddressItem } from "@/types/site-editor";
 import { useTheme } from "@/context/ThemeContext";
 import { isDarkHex } from "@/lib/theme-engine";
+import { applySiteCopyOverrides } from "@/lib/site-copy-editor";
 
 interface SiteConfigContextType {
   config: SiteConfig;
@@ -32,9 +33,13 @@ interface SiteConfigContextType {
 
 function safeMergeConfig(base: SiteConfig, override: Partial<SiteConfig>): SiteConfig {
   if (!override || typeof override !== "object") return base;
+  const textOverrides = override.textOverrides && typeof override.textOverrides === "object" && !Array.isArray(override.textOverrides)
+    ? override.textOverrides
+    : {};
   return {
     ...base,
     ...override,
+    textOverrides: { ...(base.textOverrides || {}), ...textOverrides },
     colors: { ...base.colors, ...(override.colors || {}) },
     hero: { ...base.hero, ...(override.hero || {}) },
     highlights: { ...base.highlights, ...(override.highlights || {}) },
@@ -121,6 +126,7 @@ const SiteConfigContext = createContext<SiteConfigContextType | null>(null);
 export function SiteConfigProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
   const [isLoading, setIsLoading] = useState(false);
+  const [textEditingEnabled, setTextEditingEnabled] = useState(false);
   const { setTheme } = useTheme();
 
   const fetchConfig = useCallback(async () => {
@@ -179,6 +185,13 @@ export function SiteConfigProvider({ children }: { children: React.ReactNode }) 
     fetchConfig();
 
     const handleMessage = (e: MessageEvent) => {
+      if (
+        e.source === window.parent &&
+        e.data?.type === "CODEX_TEXT_EDIT_MODE" &&
+        typeof e.data.enabled === "boolean"
+      ) {
+        setTextEditingEnabled(e.data.enabled);
+      }
       if (e.data && e.data.type === "CODEX_PREVIEW_UPDATE" && e.data.config) {
         setConfig((prev) => safeMergeConfig(prev || DEFAULT_SITE_CONFIG, e.data.config));
       }
@@ -220,6 +233,83 @@ export function SiteConfigProvider({ children }: { children: React.ReactNode }) 
       window.removeEventListener("codex_config_updated", handleConfigUpdate);
     };
   }, [fetchConfig]);
+
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>(".site-canvas");
+    if (!root) return;
+
+    const overrides = config.textOverrides || {};
+    const apply = () => applySiteCopyOverrides(root, overrides, textEditingEnabled);
+    apply();
+
+    const hasOverrides = Object.keys(overrides).length > 0;
+    if (!textEditingEnabled && !hasOverrides) return;
+
+    const observer = new MutationObserver(apply);
+    observer.observe(root, { childList: true, characterData: true, subtree: true });
+
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.dataset.codexCopyEditable) {
+        target.dataset.codexCopyOriginal = target.textContent || "";
+      }
+    };
+
+    const handleFocusOut = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const key = target.dataset.codexCopyKey;
+      if (!key) return;
+
+      const value = target.textContent || "";
+      const original = target.dataset.codexCopyOriginal;
+      delete target.dataset.codexCopyOriginal;
+      if (value === original) return;
+
+      setConfig((previous) => ({
+        ...previous,
+        textOverrides: { ...(previous.textOverrides || {}), [key]: value },
+      }));
+      if (window.self !== window.top) {
+        window.parent.postMessage({ type: "CODEX_TEXT_OVERRIDE_CHANGE", key, value }, "*");
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.dataset.codexCopyEditable) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        target.textContent = target.dataset.codexCopyOriginal || "";
+        target.blur();
+      } else if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        target.blur();
+      }
+    };
+
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const editable = target.closest<HTMLElement>("[data-codex-copy-editable='true']");
+      if (!editable) return;
+      if (editable.closest("a, button, label, summary")) event.preventDefault();
+      event.stopPropagation();
+    };
+
+    document.addEventListener("focusin", handleFocusIn, true);
+    document.addEventListener("focusout", handleFocusOut, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("click", handleClick, true);
+
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("focusin", handleFocusIn, true);
+      document.removeEventListener("focusout", handleFocusOut, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("click", handleClick, true);
+    };
+  }, [config.textOverrides, textEditingEnabled]);
 
   const updateLocalConfig = useCallback((updated: SiteConfig) => {
     setConfig(safeMergeConfig(DEFAULT_SITE_CONFIG, updated));

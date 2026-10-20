@@ -2572,6 +2572,12 @@
   background: var(--crm-card-hover);
 }
 
+.crm-admin-app .crm-preview-action-icon-btn.active {
+  border-color: var(--crm-accent);
+  color: var(--crm-accent);
+  background: color-mix(in srgb, var(--crm-accent) 12%, var(--crm-card));
+}
+
 /* Secondary Preview Bar for Page and Section Jumping */
 
 .crm-admin-app .crm-preview-page-tabs {

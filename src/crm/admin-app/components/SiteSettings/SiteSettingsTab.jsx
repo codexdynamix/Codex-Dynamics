@@ -433,6 +433,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
 
     return {
       siteName: localCfg.siteName || platformSettings?.platformName || 'Codex Dynamics',
+      textOverrides: localCfg.textOverrides || {},
       copyrightYear: localCfg.copyrightYear || platformSettings?.platformYear || '2026',
       supportEmail: localCfg.supportEmail || platformSettings?.supportEmail || 'support@codexdynamics.com',
       formSubmitEmail: localCfg.formSubmitEmail || 'codexdynamix@gmail.com',
@@ -547,6 +548,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
         setSiteConfig((previous) => ({
           ...previous,
           siteName: storedConfig.siteName ?? previous.siteName,
+          textOverrides: storedConfig.textOverrides ?? previous.textOverrides,
           copyrightYear: storedConfig.copyrightYear ?? previous.copyrightYear,
           supportEmail: storedConfig.supportEmail ?? previous.supportEmail,
           formSubmitEmail: storedConfig.formSubmitEmail ?? previous.formSubmitEmail,
@@ -605,6 +607,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
   const [isFullscreenPreview, setIsFullscreenPreview] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
   const [previewLoaded, setPreviewLoaded] = useState(false);
+  const [previewTextEditMode, setPreviewTextEditMode] = useState(false);
   const [highlightedSection, setHighlightedSection] = useState(null);
   const previewIframeRef = useRef(null);
   const fullscreenIframeRef = useRef(null);
@@ -663,6 +666,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
     const isDark = isDarkColor(configToSync.backgroundColor);
     const fullPreviewConfig = {
       siteName: configToSync.siteName,
+      textOverrides: configToSync.textOverrides || {},
       copyrightYear: configToSync.copyrightYear,
       supportEmail: configToSync.supportEmail,
       formSubmitEmail: configToSync.formSubmitEmail,
@@ -732,9 +736,13 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
           type: 'CODEX_PREVIEW_UPDATE',
           config: fullPreviewConfig
         }, '*');
+        iframe.contentWindow.postMessage({
+          type: 'CODEX_TEXT_EDIT_MODE',
+          enabled: previewTextEditMode
+        }, '*');
       }
     });
-  }, []);
+  }, [previewTextEditMode]);
 
   useEffect(() => {
     syncToPreview(siteConfig);
@@ -744,6 +752,24 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
     const handleParentMsg = (e) => {
       if (e.data && e.data.type === 'CODEX_PREVIEW_READY') {
         syncToPreview(siteConfig);
+      }
+      if (
+        e.data?.type === 'CODEX_TEXT_OVERRIDE_CHANGE' &&
+        e.origin === window.location.origin &&
+        [previewIframeRef.current?.contentWindow, fullscreenIframeRef.current?.contentWindow].includes(e.source) &&
+        typeof e.data.key === 'string' &&
+        e.data.key.length <= 2048 &&
+        typeof e.data.value === 'string' &&
+        e.data.value.length <= 10000
+      ) {
+        setSiteConfig((previous) => ({
+          ...previous,
+          textOverrides: {
+            ...(previous.textOverrides || {}),
+            [e.data.key]: e.data.value,
+          },
+        }));
+        setHasUnsavedChanges(true);
       }
     };
     window.addEventListener('message', handleParentMsg);
@@ -1337,6 +1363,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
           subtitle: siteConfig.heroSubtitle,
           badge: siteConfig.heroBadge
         },
+        textOverrides: siteConfig.textOverrides || {},
         colors: {
           primary: siteConfig.primaryColor,
           secondary: siteConfig.secondaryColor,
@@ -1426,6 +1453,7 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
       heroTitle: 'Precision on every screen.',
       heroSubtitle: 'High-performance websites, custom CRM software, and digital marketing engines.',
       heroBadge: 'Codex Dynamics',
+      textOverrides: {},
       activeTheme: DEFAULT_SITE_THEME_PRESET.id,
       siteMode: 'dark',
       primaryColor: DEFAULT_SITE_THEME_PRESET.primary,
@@ -3183,6 +3211,24 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
                     </div>
 
                     {/* Action buttons */}
+                    <button
+                      type="button"
+                      className={`crm-preview-action-icon-btn ${previewTextEditMode ? 'active' : ''}`}
+                      aria-pressed={previewTextEditMode}
+                      onClick={() => {
+                        const enabled = !previewTextEditMode;
+                        setPreviewTextEditMode(enabled);
+                        showNotification(
+                          enabled
+                            ? 'Click any text in the preview to edit it. Press Enter to finish or Escape to cancel, then save your changes.'
+                            : 'Text editing is off. Save All Changes to publish your copy edits.'
+                        );
+                      }}
+                      title={previewTextEditMode ? 'Turn off text editing' : 'Edit any text in the site preview'}
+                    >
+                      <Edit size={12} />
+                      <span>{previewTextEditMode ? 'Done Editing' : 'Edit Text'}</span>
+                    </button>
                     <button
                       type="button"
                       className="crm-preview-action-icon-btn"

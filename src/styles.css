@@ -799,6 +799,22 @@
   color: var(--color-foreground);
 }
 
+.site-canvas [data-codex-copy-editable="true"] {
+  cursor: text;
+  border-radius: 2px;
+}
+
+.site-canvas [data-codex-copy-editable="true"]:hover {
+  outline: 1px dashed color-mix(in srgb, var(--color-primary) 75%, transparent);
+  outline-offset: 2px;
+}
+
+.site-canvas [data-codex-copy-editable="true"]:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  user-select: text;
+}
+
 .site-canvas h1,
 .site-canvas h2,
 .site-canvas h3,
