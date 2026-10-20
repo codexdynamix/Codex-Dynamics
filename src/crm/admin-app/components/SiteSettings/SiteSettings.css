@@ -2267,16 +2267,12 @@
 /* Quick Swatch Bar - 2x2 Clean Pro Grid for Left Column */
 .crm-admin-app .crm-color-swatch-bar {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   gap: 10px;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
-}
-
-@media (max-width: 440px) {
-  .crm-admin-app .crm-color-swatch-bar {
-    grid-template-columns: 1fr;
-  }
 }
 
 .crm-admin-app .crm-color-swatch-item {
@@ -2284,6 +2280,7 @@
   flex-direction: column;
   gap: 5px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .crm-admin-app .crm-color-swatch-item label {
@@ -2305,6 +2302,7 @@
   padding: 6px 10px;
   transition: border-color 0.15s ease;
   min-width: 0;
+  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -2315,14 +2313,19 @@
 .crm-admin-app .crm-color-picker-input-wrapper input[type="color"] {
   -webkit-appearance: none;
   appearance: none;
-  width: 24px;
+  width: 24px !important;
   height: 24px;
+  min-width: 24px !important;
+  min-height: 24px !important;
   border: none;
   border-radius: 5px;
   cursor: pointer;
   background: transparent;
-  padding: 0;
-  flex-shrink: 0;
+  padding: 0 !important;
+  margin: 0 !important;
+  flex: 0 0 24px;
+  box-sizing: border-box;
+  border: 0 !important;
 }
 
 .crm-admin-app .crm-color-picker-input-wrapper input[type="color"]::-webkit-color-swatch-wrapper {
@@ -2335,6 +2338,11 @@
 }
 
 .crm-admin-app .crm-color-picker-hex {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11.5px;
   font-weight: 600;
