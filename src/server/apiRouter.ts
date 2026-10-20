@@ -10,8 +10,7 @@ import { normalizeAdminRole } from '../crm/roleNormalization.js';
 export const apiRouter = Router();
 
 function clientAccessEncryptionKey(): Buffer {
-  const source = process.env.MONGODB_URI;
-  if (!source) throw Object.assign(new Error('Client access storage is unavailable.'), { status: 503 });
+  const source = process.env.MONGODB_URI || 'codex-dynamics-in-memory-client-access-secret';
   return createHash('sha256').update(`codex-dynamics-client-access:${source}`).digest();
 }
 function encryptClientAccessSecret(value: string): Record<string, string> | null {
@@ -2252,8 +2251,7 @@ const SUPER_ADMIN_RESET_ID = 'super-admin';
 const RESET_CODE_TTL_MS = 10 * 60 * 1000;
 
 function hashSuperAdminResetCode(code: string): string {
-  const secret = process.env.MONGODB_URI;
-  if (!secret) throw Object.assign(new Error('Password recovery is unavailable.'), { status: 503 });
+  const secret = process.env.MONGODB_URI || 'codex-dynamics-in-memory-reset-secret';
   return createHmac('sha256', secret).update(code).digest('hex');
 }
 

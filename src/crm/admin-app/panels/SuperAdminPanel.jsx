@@ -102,7 +102,7 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
   const [binPage, setBinPage] = useState(1);
   const pageSize = 20;
   const [view, setView] = useState('active'); // 'active' | 'bin'
-  const [tableClients, setTableClients] = useState([]);
+  const [tableClients, setTableClients] = useState(() => (Array.isArray(data?.clients) && data.clients.length > 0 ? data.clients.slice(0, 20) : []));
   const [tableHasMore, setTableHasMore] = useState(false);
   const [tableLoading, setTableLoading] = useState(false);
   const [tableError, setTableError] = useState('');
@@ -835,7 +835,8 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
     const requestId = ++tableRequestId.current;
     let active = true;
     const debounceId = window.setTimeout(() => {
-      setTableLoading(true);
+      // Only set loading true if we do not already have rows to display
+      setTableLoading(tableClients.length === 0);
       setTableError('');
       listClients({
         search,
@@ -874,10 +875,19 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
     };
   }, [
     view, search, filterOffice, filterTeam, filterTeamLeader, filterAgent,
-    filterOwnership, showUnassignedOnly, filterStatus, page, data.clients,
+    filterOwnership, showUnassignedOnly, filterStatus, page,
   ]);
 
-  const paged = tableClients;
+  const hasActiveFilters = Boolean(
+    search.trim() || filterOffice || filterTeam || filterTeamLeader || filterAgent ||
+    filterOwnership || showUnassignedOnly || filterStatus
+  );
+
+  const paged = tableClients.length > 0
+    ? tableClients
+    : (!hasActiveFilters && Array.isArray(data?.clients) && data.clients.length > 0)
+      ? data.clients.slice((page - 1) * pageSize, page * pageSize)
+      : tableClients;
   const totalPages = Math.max(1, page + (tableHasMore ? 1 : 0));
 
   const deletedClients = data.deletedClients || [];
@@ -1535,14 +1545,14 @@ function AllClientsTable({ data, currentUser, setData, setClientAssignment, show
 
           <div className="crm-inline-2b759092af">
             Click any row to open the client profile. Showing {paged.length} clients on page {page}{tableHasMore ? ' · more available' : ''}
-            {tableLoading && ' · loading'}
+            {tableLoading && paged.length === 0 && ' · loading'}
             {tableError && <span role="alert"> · {tableError}</span>}
           </div>
 
           <ClientManagementTable
             data={data}
             clients={paged}
-            loading={tableLoading}
+            loading={tableLoading && paged.length === 0}
             selected={selected}
             onTogglePage={(checked) => {
               if (checked) setSelected([...new Set([...selected, ...paged.map((client) => client.id)])]);

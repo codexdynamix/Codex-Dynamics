@@ -126,7 +126,7 @@ export function UserChrome({ user, data, setData }) {
 
     const computedStyle = window.getComputedStyle(crmRoot);
     return Object.fromEntries(
-      ['--crm-bg', '--crm-card', '--crm-card-hover', '--crm-card-surface', '--crm-panel-surface', '--crm-border', '--crm-text-primary', '--crm-text-secondary', '--crm-accent', '--crm-radius', '--crm-ios-shadow-modal']
+      ['--crm-bg', '--crm-card', '--crm-card-hover', '--crm-card-surface', '--crm-border', '--crm-text-primary', '--crm-text-secondary', '--crm-accent', '--crm-radius', '--crm-ios-shadow-modal']
         .map((property) => [property, computedStyle.getPropertyValue(property).trim()])
         .filter(([, value]) => value)
     );
