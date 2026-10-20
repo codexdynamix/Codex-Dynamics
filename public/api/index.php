@@ -168,35 +168,6 @@ class MongoService {
             ->countDocuments($filter);
     }
 
-    public static function optimizeClientVisibility(): array {
-        $clients = self::$client
-            ->selectDatabase(self::$databaseName)
-            ->selectCollection('clients');
-        $binResult = $clients->updateMany(
-            ['is_bin' => ['$ne' => true]],
-            ['$set' => ['is_bin' => false]]
-        );
-        $missingDeletedAtResult = $clients->updateMany(
-            ['deleted_at' => ['$exists' => false]],
-            ['$set' => ['deleted_at' => null]]
-        );
-        $emptyDeletedAtResult = $clients->updateMany(
-            ['deleted_at' => ''],
-            ['$set' => ['deleted_at' => null]]
-        );
-        $indexName = $clients->createIndex(
-            ['is_bin' => 1, 'deleted_at' => 1, '_id' => -1],
-            ['name' => 'clients_visibility_sort']
-        );
-
-        return [
-            'is_bin_modified' => $binResult->getModifiedCount(),
-            'deleted_at_missing_modified' => $missingDeletedAtResult->getModifiedCount(),
-            'deleted_at_empty_modified' => $emptyDeletedAtResult->getModifiedCount(),
-            'index' => $indexName,
-        ];
-    }
-
     public static function insert(string $name, array $doc): array {
         $col = self::$client->selectDatabase(self::$databaseName)->selectCollection($name);
         if (!isset($doc['id'])) {
@@ -1148,20 +1119,6 @@ if ($path === '/admin/sessions' && $method === 'DELETE') {
 // 3. Admin Clients
 if (str_starts_with($path, '/admin/clients')) {
     chatStaffFromRequest();
-}
-
-if ($path === '/admin/clients/optimize' && $method === 'POST') {
-    $staff = chatStaffFromRequest();
-    $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
-    if ($role !== 'superadmin') {
-        jsonOut(['ok' => false, 'error' => 'Only Super Admin can optimize client visibility.'], 403);
-    }
-    try {
-        jsonOut(['ok' => true, 'maintenance' => MongoService::optimizeClientVisibility()]);
-    } catch (Throwable $error) {
-        error_log('[MongoService] Client visibility maintenance failed.');
-        jsonOut(['ok' => false, 'error' => 'Client visibility maintenance failed; check MongoDB permissions and retry.'], 500);
-    }
 }
 
 function clientListAssignedFields(array $fields): array {
