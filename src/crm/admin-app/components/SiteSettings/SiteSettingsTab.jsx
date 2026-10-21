@@ -580,7 +580,11 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
             ? { ...previous.whatsappDock, ...storedConfig.whatsapp }
             : previous.whatsappDock,
           tidioChat: storedConfig.tidio
-            ? { ...previous.tidioChat, ...storedConfig.tidio }
+            ? {
+                ...previous.tidioChat,
+                ...storedConfig.tidio,
+                publicKey: storedConfig.tidio.publicKey || previous.tidioChat.publicKey || DEFAULT_SITE_CONFIG.tidio.publicKey
+              }
             : previous.tidioChat,
           seo: storedConfig.seo ? { ...previous.seo, ...storedConfig.seo } : previous.seo,
           security: {
