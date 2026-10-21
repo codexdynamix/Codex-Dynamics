@@ -308,11 +308,12 @@ export default function ProjectsTab({ showNotification = () => {} }) {
       metrics: Array.isArray(proj.metrics) ? proj.metrics.map(m => ({ ...m })) : [],
       features: Array.isArray(proj.features) ? [...proj.features] : [],
       newFeatureInput: '',
-      lighthouse: proj.lighthouse || {
+      lighthouse: {
         performance: '',
         accessibility: '',
         bestPractices: '',
         seo: '',
+        ...(proj.lighthouse || {}),
       },
       featured: Boolean(proj.featured),
       published: proj.published !== false,
@@ -1450,7 +1451,7 @@ export default function ProjectsTab({ showNotification = () => {} }) {
 
               {/* 5. Metrics & Lighthouse */}
               <div className="crm-proj-form-section">
-                <span className="crm-proj-section-title">5. Business Metrics & Lighthouse Speed</span>
+                <span className="crm-proj-section-title">5. Business Metrics & Lighthouse Scores</span>
 
                 <div className="crm-inline-c1d507337e">
                   {formData.metrics.map((m, idx) => (
@@ -1495,13 +1496,13 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                   </button>
                 </div>
 
-                {/* Lighthouse Performance Score Input */}
+                {/* Lighthouse score inputs */}
                 <div className="crm-proj-form-grid-2 crm-inline-54d32d80db" >
                   <div className="crm-proj-form-group">
                     <label>Lighthouse Performance Score (0 - 100)</label>
                     <input
                       type="number"
-                      min={1}
+                      min={0}
                       max={100}
                       value={formData.lighthouse.performance}
                       onChange={e => setFormData({
@@ -1514,10 +1515,42 @@ export default function ProjectsTab({ showNotification = () => {} }) {
                     />
                   </div>
                   <div className="crm-proj-form-group">
+                    <label>Accessibility Score (0 - 100)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={formData.lighthouse.accessibility}
+                      onChange={e => setFormData({
+                        ...formData,
+                        lighthouse: {
+                          ...formData.lighthouse,
+                          accessibility: e.target.value === '' ? '' : Number(e.target.value),
+                        }
+                      })}
+                    />
+                  </div>
+                  <div className="crm-proj-form-group">
+                    <label>Best Practices Score (0 - 100)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={formData.lighthouse.bestPractices}
+                      onChange={e => setFormData({
+                        ...formData,
+                        lighthouse: {
+                          ...formData.lighthouse,
+                          bestPractices: e.target.value === '' ? '' : Number(e.target.value),
+                        }
+                      })}
+                    />
+                  </div>
+                  <div className="crm-proj-form-group">
                     <label>SEO Score (0 - 100)</label>
                     <input
                       type="number"
-                      min={1}
+                      min={0}
                       max={100}
                       value={formData.lighthouse.seo}
                       onChange={e => setFormData({
