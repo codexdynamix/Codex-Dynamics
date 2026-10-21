@@ -623,6 +623,31 @@
   border-radius: 999px;
 }
 
+.project-detail-scroll {
+  scrollbar-color: color-mix(in srgb, var(--color-border) 75%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.project-detail-scroll::-webkit-scrollbar {
+  width: 7px;
+}
+
+.project-detail-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.project-detail-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border) 75%, transparent);
+  background-clip: padding-box;
+}
+
+.project-detail-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border);
+  background-clip: padding-box;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

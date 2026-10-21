@@ -611,25 +611,26 @@ export function ProjectShowcaseGrid() {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-md animate-in fade-in duration-200"
+          aria-label={`${selectedProject.title} project details`}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-0 backdrop-blur-md animate-in fade-in duration-200 sm:p-5"
           onClick={() => setSelectedProject(null)}
         >
           <div
-            className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-hairline bg-card shadow-2xl p-6 sm:p-8 animate-in zoom-in-95 duration-200"
+            className="relative flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden border border-hairline bg-card shadow-2xl animate-in zoom-in-95 duration-200 sm:h-[92vh] sm:max-h-[900px] sm:max-w-4xl sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header Bar */}
-            <div className="flex items-start justify-between gap-4 border-b border-hairline pb-5">
-              <div>
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-hairline bg-card px-4 py-4 sm:px-7 sm:py-5">
+              <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   <span className="rounded-full bg-blue/10 px-2.5 py-0.5 text-xs font-semibold text-blue">
                     {selectedProject.category}
                   </span>
                   <span className="text-xs font-mono text-subtle">
-                    {selectedProject.client} · {selectedProject.completionDate}
+                    {[selectedProject.client, selectedProject.completionDate].filter(Boolean).join(" · ")}
                   </span>
                 </div>
-                <h3 className="text-2xl sm:text-3xl font-semibold tracking-tight text-label">
+                <h3 className="text-xl font-semibold tracking-tight text-label sm:text-3xl">
                   {selectedProject.title}
                 </h3>
               </div>
@@ -637,7 +638,8 @@ export function ProjectShowcaseGrid() {
               <button
                 type="button"
                 onClick={() => setSelectedProject(null)}
-                className="rounded-full border border-hairline p-2 text-subtle hover:bg-muted hover:text-label transition-colors"
+                aria-label="Close project details"
+                className="shrink-0 rounded-full border border-hairline bg-muted/50 p-2 text-subtle transition-colors hover:bg-muted hover:text-label"
                 title="Close modal"
               >
                 <X className="size-4" />
@@ -645,14 +647,15 @@ export function ProjectShowcaseGrid() {
             </div>
 
             {/* Modal Body */}
-            <div className="mt-6 space-y-6">
+            <div className="project-detail-scroll min-h-0 flex-1 overscroll-contain px-4 py-5 sm:px-7 sm:py-6">
+              <div className="space-y-6">
               {/* Media Preview */}
-              <div className="relative aspect-[16/9] overflow-hidden rounded-xl bg-ink border border-hairline">
+              <div className="relative aspect-[16/9] overflow-hidden rounded-2xl border border-hairline bg-ink">
                 {selectedProject.video ? (
                   <video
                     src={selectedProject.video}
                     poster={selectedProject.image}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-contain"
                     controls
                     autoPlay
                     muted
@@ -787,11 +790,13 @@ export function ProjectShowcaseGrid() {
                   ))}
                 </div>
               </div>
+              </div>
 
               {/* Modal Action CTA */}
-              <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-hairline">
-                <div className="text-xs text-subtle">
-                  Interested in an architecture like this for your brand?
+            </div>
+            <div className="flex shrink-0 flex-col gap-3 border-t border-hairline bg-card px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+                <div className="text-xs text-subtle sm:max-w-[45%]">
+                  Interested in a project like this for your brand?
                 </div>
 
                 <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -800,10 +805,10 @@ export function ProjectShowcaseGrid() {
                       href={selectedProject.site_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-full border border-hairline bg-card px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+                      className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-hairline bg-card px-4 py-2.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted sm:flex-none"
                     >
                       <Laptop className="size-3.5" />
-                      <span>Visit Live Demo</span>
+                      <span>Visit Site</span>
                       <ExternalLink className="size-3" />
                     </a>
                   )}
@@ -813,13 +818,12 @@ export function ProjectShowcaseGrid() {
                       setSelectedProject(null);
                       openContactModal(`Inquiry about ${selectedProject.title}`);
                     }}
-                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-full bg-foreground px-5 py-2 text-xs font-semibold text-background hover:opacity-90 transition-opacity"
+                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-xs font-semibold text-background transition-opacity hover:opacity-90 sm:flex-none"
                   >
                     <span>Start a Project</span>
                     <ArrowUpRight className="size-3.5" />
                   </button>
                 </div>
-              </div>
             </div>
           </div>
         </div>
