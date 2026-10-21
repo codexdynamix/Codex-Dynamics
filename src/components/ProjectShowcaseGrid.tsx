@@ -57,6 +57,13 @@ function normalizeProject(project: any): ShowcaseProject {
   };
 }
 
+function getProjectVideoSource(project: ShowcaseProject): string | undefined {
+  const source = project.video?.trim();
+  if (!source) return undefined;
+  const path = source.split(/[?#]/, 1)[0];
+  return /\.(?:mp4|webm)$/i.test(path) ? source : undefined;
+}
+
 export function ProjectShowcaseGrid() {
   const [projects, setProjects] = useState<ShowcaseProject[]>([]);
   const [savedCategories, setSavedCategories] = useState<string[]>([]);
@@ -331,9 +338,9 @@ export function ProjectShowcaseGrid() {
               <div className="grid lg:grid-cols-12 gap-0">
                 {/* Media Presentation */}
                 <div className="relative aspect-[16/10] lg:aspect-auto lg:col-span-7 overflow-hidden bg-ink">
-                  {featured.video ? (
+                  {getProjectVideoSource(featured) ? (
                     <video
-                      src={featured.video}
+                      src={getProjectVideoSource(featured)}
                       poster={featured.image}
                       className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                       autoPlay
@@ -479,9 +486,9 @@ export function ProjectShowcaseGrid() {
                 <div>
                   {/* Card Media with Zoom and Hover Action */}
                   <div className="relative aspect-[16/10] overflow-hidden bg-muted">
-                    {project.video ? (
+                    {getProjectVideoSource(project) ? (
                       <video
-                        src={project.video}
+                        src={getProjectVideoSource(project)}
                         poster={project.image}
                         className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                         autoPlay
@@ -651,9 +658,9 @@ export function ProjectShowcaseGrid() {
               <div className="space-y-6">
               {/* Media Preview */}
               <div className="relative aspect-[16/9] overflow-hidden rounded-2xl border border-hairline bg-ink">
-                {selectedProject.video ? (
+                {getProjectVideoSource(selectedProject) ? (
                   <video
-                    src={selectedProject.video}
+                    src={getProjectVideoSource(selectedProject)}
                     poster={selectedProject.image}
                     className="h-full w-full object-contain"
                     controls
