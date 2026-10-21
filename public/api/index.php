@@ -2207,8 +2207,22 @@ if ($path === '/admin/site-content/action' && $method === 'POST') {
     jsonOut(['ok' => false, 'error' => 'Unsupported site-content action.'], 400);
 }
 
+function normalizeMongoValue(mixed $value): mixed {
+    if ($value instanceof \Traversable) {
+        $value = iterator_to_array($value);
+    } elseif (is_object($value)) {
+        $value = get_object_vars($value);
+    }
+    if (!is_array($value)) return $value;
+
+    foreach ($value as $key => $item) {
+        $value[$key] = normalizeMongoValue($item);
+    }
+    return $value;
+}
+
 function settingsResponse(array $record): array {
-    $siteConfig = $record['site_config'] ?? null;
+    $siteConfig = normalizeMongoValue($record['site_config'] ?? null);
     unset($record['_id'], $record['site_config']);
     return ['settings' => $record, 'site_config' => $siteConfig];
 }
