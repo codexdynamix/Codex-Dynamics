@@ -609,13 +609,13 @@ export function ProjectShowcaseGrid() {
       {/* Detailed Project Specs & Case Study Dialog Modal */}
       {selectedProject && (
         <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`${selectedProject.title} project details`}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-0 backdrop-blur-md animate-in fade-in duration-200 sm:p-5"
           onClick={() => setSelectedProject(null)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${selectedProject.title} project details`}
             className="relative flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden border border-hairline bg-card shadow-2xl animate-in zoom-in-95 duration-200 sm:h-[92vh] sm:max-h-[900px] sm:max-w-4xl sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
@@ -647,7 +647,7 @@ export function ProjectShowcaseGrid() {
             </div>
 
             {/* Modal Body */}
-            <div className="project-detail-scroll min-h-0 flex-1 overscroll-contain px-4 py-5 sm:px-7 sm:py-6">
+            <div className="project-detail-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-7 sm:py-6">
               <div className="space-y-6">
               {/* Media Preview */}
               <div className="relative aspect-[16/9] overflow-hidden rounded-2xl border border-hairline bg-ink">
@@ -818,7 +818,7 @@ export function ProjectShowcaseGrid() {
                       setSelectedProject(null);
                       openContactModal(`Inquiry about ${selectedProject.title}`);
                     }}
-                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-xs font-semibold text-background transition-opacity hover:opacity-90 sm:flex-none"
+                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-blue px-5 py-2.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 sm:flex-none"
                   >
                     <span>Start a Project</span>
                     <ArrowUpRight className="size-3.5" />
