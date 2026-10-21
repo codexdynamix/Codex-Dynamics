@@ -121,11 +121,11 @@ class MongoService {
         return $result->getMatchedCount();
     }
 
-    public static function updateOneWithOperators(string $name, array $filter, array $operators): int {
+    public static function updateOneWithOperators(string $name, array $filter, array $operators, array $options = []): int {
         $result = self::$client
             ->selectDatabase(self::$databaseName)
             ->selectCollection($name)
-            ->updateOne($filter, $operators);
+            ->updateOne($filter, $operators, $options);
         return $result->getMatchedCount();
     }
 
@@ -2207,13 +2207,99 @@ if ($path === '/admin/site-content/action' && $method === 'POST') {
     jsonOut(['ok' => false, 'error' => 'Unsupported site-content action.'], 400);
 }
 
-if ($path === '/admin/settings' || $path === '/crm/settings') {
-    if ($method === 'POST') {
-        $settings = MongoService::insert('platform_settings', $body);
-        jsonOut(['ok' => true, 'settings' => $settings]);
+function settingsResponse(array $record): array {
+    $siteConfig = $record['site_config'] ?? null;
+    unset($record['_id'], $record['site_config']);
+    return ['settings' => $record, 'site_config' => $siteConfig];
+}
+
+function sanitizePublicSiteConfig(mixed $siteConfig): ?array {
+    if (!is_array($siteConfig)) return null;
+    unset($siteConfig['webhookUrl'], $siteConfig['webhook_url']);
+    if (is_array($siteConfig['security'] ?? null)) {
+        unset($siteConfig['security']['webhookUrl'], $siteConfig['security']['webhook_url']);
     }
-    $settings = MongoService::findOne('platform_settings', []) ?: ['siteName' => 'Codex Dynamics'];
-    jsonOut(['ok' => true, 'settings' => $settings]);
+    return $siteConfig;
+}
+
+if ($path === '/crm/settings') {
+    if ($method !== 'GET') {
+        jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    }
+    $record = MongoService::findOne('platform_settings', []) ?: [];
+    $response = settingsResponse($record);
+    unset(
+        $response['settings']['webhook'],
+        $response['settings']['webhookUrl'],
+        $response['settings']['webhook_url'],
+        $response['settings']['allowedOrigins']
+    );
+    $response['site_config'] = sanitizePublicSiteConfig($response['site_config']);
+    jsonOut(['ok' => true, ...$response]);
+}
+
+if ($path === '/admin/settings') {
+    if ($method === 'GET') {
+        chatStaffFromRequest();
+        $record = MongoService::findOne('platform_settings', []) ?: [];
+        jsonOut(['ok' => true, ...settingsResponse($record)]);
+    }
+
+    if ($method !== 'PUT' && $method !== 'POST') {
+        jsonOut(['ok' => false, 'error' => 'Method not allowed.'], 405);
+    }
+
+    $staff = chatStaffFromRequest();
+    $hasSiteConfig = array_key_exists('site_config', $body);
+    $settings = $body['settings'] ?? null;
+    if ($settings !== null && !is_array($settings)) {
+        jsonOut(['ok' => false, 'error' => 'Settings must be a JSON object.'], 400);
+    }
+    if ($hasSiteConfig && $body['site_config'] !== null && !is_array($body['site_config'])) {
+        jsonOut(['ok' => false, 'error' => 'Site configuration must be a JSON object or null.'], 400);
+    }
+
+    $settings = $settings ?? [];
+    foreach (array_keys($settings) as $key) {
+        if (!preg_match('/^[A-Za-z][A-Za-z0-9_]*$/', (string)$key)
+            || $key === 'id'
+            || $key === 'site_config'
+            || $key === 'webhook') {
+            jsonOut(['ok' => false, 'error' => 'Settings contain an invalid field.'], 400);
+        }
+    }
+    if (!$settings && !$hasSiteConfig) {
+        jsonOut(['ok' => false, 'error' => 'Settings or site_config must be supplied.'], 400);
+    }
+
+    $changesSiteSettings = $hasSiteConfig;
+    foreach (array_keys($settings) as $key) {
+        if ($key !== 'crmTheme') {
+            $changesSiteSettings = true;
+            break;
+        }
+    }
+    if ($changesSiteSettings) {
+        $role = strtolower((string)(preg_replace('/[\s_-]+/', '', (string)($staff['role'] ?? '')) ?? ''));
+        if ($role !== 'superadmin') {
+            jsonOut(['ok' => false, 'error' => 'Only Super Admins can update site settings.'], 403);
+        }
+    }
+
+    $updates = $settings;
+    $updates['updatedAt'] = date('c');
+    $operators = ['$set' => $updates];
+    if ($hasSiteConfig) {
+        if ($body['site_config'] === null) {
+            $operators['$unset'] = ['site_config' => ''];
+        } else {
+            $operators['$set']['site_config'] = $body['site_config'];
+        }
+    }
+    MongoService::updateOneWithOperators('platform_settings', [], $operators, ['upsert' => true]);
+
+    $saved = MongoService::findOne('platform_settings', []) ?: [];
+    jsonOut(['ok' => true, ...settingsResponse($saved)]);
 }
 
 // 5. Client Portal
