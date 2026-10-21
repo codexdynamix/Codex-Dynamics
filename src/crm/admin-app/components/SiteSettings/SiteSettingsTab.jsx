@@ -8,6 +8,7 @@ import {
   fetchSiteConfigFromBackend,
   sanitizePublicSiteConfig,
 } from '../../../platformDefaults';
+import { DEFAULT_SITE_CONFIG } from '../../../../types/site-editor';
 import {
   Palette,
   Phone,
@@ -514,8 +515,8 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
 
       // Tidio Chat
       tidioChat: {
-        enabled: localCfg.tidio?.enabled ?? false,
-        publicKey: localCfg.tidio?.publicKey || '',
+        enabled: localCfg.tidio?.enabled ?? DEFAULT_SITE_CONFIG.tidio.enabled,
+        publicKey: localCfg.tidio?.publicKey || DEFAULT_SITE_CONFIG.tidio.publicKey,
         position: localCfg.tidio?.position || 'bottom-right'
       },
 
@@ -1486,7 +1487,11 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
         defaultMessage: "Hello Codex Dynamics, I'm interested in building a high-performance web project.",
         position: 'bottom-right'
       },
-      tidioChat: { enabled: false, publicKey: '', position: 'bottom-right' },
+      tidioChat: {
+        enabled: DEFAULT_SITE_CONFIG.tidio.enabled,
+        publicKey: DEFAULT_SITE_CONFIG.tidio.publicKey,
+        position: DEFAULT_SITE_CONFIG.tidio.position
+      },
       seo: {
         metaTitle: 'Codex Dynamics | High-Performance Websites & Custom CRMs',
         metaDescription: 'High-performance websites, web design, web development, custom CRMs, and digital marketing agency.',
@@ -3139,6 +3144,53 @@ export default function SiteSettingsTab({ showNotification = () => {}, initialSu
                           </div>
                         </div>
                       )}
+                    </div>
+
+                    <div className="crm-ios-inset-box">
+                      <div className="crm-inline-9f24c54895">
+                        <div>
+                          <div className="crm-inline-486712a726">
+                            <MessageCircle size={18} />
+                            Tidio Live Chat
+                          </div>
+                          <div className="crm-inline-3c5edc879d">
+                            Connect the Tidio widget to the public website.
+                          </div>
+                        </div>
+                        <label className="crm-toggle-switch" title="Toggle Tidio chat">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(siteConfig.tidioChat?.enabled)}
+                            onChange={() => updateNestedField('tidioChat', 'enabled', !siteConfig.tidioChat?.enabled)}
+                          />
+                          <span className="crm-toggle-slider" />
+                        </label>
+                      </div>
+
+                      <div className="crm-form-responsive-grid crm-inline-7dc470f7a1">
+                        <div className="crm-settings-field">
+                          <label>Tidio Public Key</label>
+                          <input
+                            type="text"
+                            className="crm-settings-input"
+                            value={siteConfig.tidioChat?.publicKey || ''}
+                            onChange={(e) => updateNestedField('tidioChat', 'publicKey', e.target.value)}
+                            placeholder="Paste the key from your Tidio installation code"
+                            autoComplete="off"
+                          />
+                        </div>
+                        <div className="crm-settings-field">
+                          <label>Widget Position</label>
+                          <select
+                            className="crm-settings-input"
+                            value={siteConfig.tidioChat?.position || 'bottom-right'}
+                            onChange={(e) => updateNestedField('tidioChat', 'position', e.target.value)}
+                          >
+                            <option value="bottom-right">Bottom right</option>
+                            <option value="bottom-left">Bottom left</option>
+                          </select>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
