@@ -3,6 +3,9 @@
   RewriteEngine On
   RewriteBase /
 
+  # Keep legacy favicon URLs pointed at the current brand mark.
+  RewriteRule ^favicon\.(ico|svg)$ /favicon-clean.png [R=301,L]
+
   # Secure database files from direct browser HTTP access
   # Single Page Application (SPA) Fallback for static builds
   RewriteCond %{REQUEST_FILENAME} !-f
