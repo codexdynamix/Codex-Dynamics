@@ -92,9 +92,12 @@ export function SEO({
       if (el) el.remove();
     };
 
-    // Favicon update
-    if (config.branding?.favicon) {
-      setLink("icon", config.branding.favicon);
+    // Older saved site settings still point to the placeholder C icon.
+    const configuredFavicon = config.branding?.favicon;
+    const favicon =
+      configuredFavicon === "/favicon.svg" ? "/favicon-clean.png" : configuredFavicon;
+    if (favicon) {
+      setLink("icon", favicon);
     }
 
     // Google Search Console Verification
