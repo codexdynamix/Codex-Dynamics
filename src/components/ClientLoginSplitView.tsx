@@ -210,9 +210,11 @@ export function ClientLoginSplitView({
             onClick={handleReturnToSite}
             className="inline-flex items-center gap-2.5 group cursor-pointer text-left"
           >
-            <span className="size-7 rounded-lg bg-white text-black font-mono text-xs font-bold flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-              C
-            </span>
+            <img
+              src="/favicon.png"
+              alt=""
+              className="size-7 rounded-lg bg-white p-0.5 object-contain group-hover:scale-105 transition-transform"
+            />
             <span className="font-semibold text-sm tracking-wide text-white font-display">
               Codex Dynamics
             </span>

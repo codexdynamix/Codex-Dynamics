@@ -23,13 +23,15 @@ import { useLoginView } from "@/context/LoginViewContext";
 import { readPortalSession, type PortalSession } from "@/services/portalAuth";
 import { useTheme } from "@/context/ThemeContext";
 
-function Mark({ letter, logoUrl }: { letter?: string; logoUrl?: string }) {
+function Mark({ letter, logoUrl, wordmark = false }: { letter?: string; logoUrl?: string; wordmark?: boolean }) {
   if (logoUrl) {
     return (
       <img
         src={logoUrl}
-        alt="Logo"
-        className="size-7 object-contain rounded-[6px]"
+        alt={wordmark ? "Codex Dynamics" : "Logo"}
+        className={wordmark
+          ? "h-11 w-24 object-contain rounded-lg bg-white p-1 sm:w-28"
+          : "size-7 object-contain rounded-[6px] bg-white p-0.5"}
       />
     );
   }
@@ -134,6 +136,9 @@ export function Nav() {
 
   const brandName = config.siteName || "Codex Dynamics";
   const brandInitial = brandName.trim().charAt(0).toUpperCase() || "C";
+  const configuredLogo = config.branding?.logoLight || config.branding?.logoDark;
+  const brandLogo = configuredLogo || "/logo.png";
+  const usesWordmark = brandLogo === "/logo.png";
 
   const instagramHref = config.headerSocials?.instagram?.url || socialsGrouped.instagram?.[0]?.href || LINKS.instagram;
   const facebookHref = config.headerSocials?.facebook?.url || socialsGrouped.facebook?.[0]?.href || LINKS.facebook;
@@ -259,15 +264,21 @@ export function Nav() {
             className="flex items-center gap-2.5 rounded-full py-1 pr-3 pl-1 transition-opacity hover:opacity-80 cursor-pointer shrink-0"
             aria-label={`${brandName} home`}
           >
-            <Mark letter={brandInitial} logoUrl={config.branding?.logoLight || config.branding?.logoDark} />
-            <span
-              className={cn(
-                "text-[13px] sm:text-sm font-semibold tracking-tight font-display transition-colors",
-                isDarkPill ? "text-white" : "text-[#111113]"
-              )}
-            >
-              {brandName}
-            </span>
+            <Mark
+              letter={brandInitial}
+              logoUrl={brandLogo}
+              wordmark={usesWordmark}
+            />
+            {!usesWordmark && (
+              <span
+                className={cn(
+                  "text-[13px] sm:text-sm font-semibold tracking-tight font-display transition-colors",
+                  isDarkPill ? "text-white" : "text-[#111113]"
+                )}
+              >
+                {brandName}
+              </span>
+            )}
           </button>
 
           {/* Center: Navigation Links (Desktop) */}
