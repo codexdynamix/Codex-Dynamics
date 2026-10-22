@@ -106,12 +106,6 @@ export function SiteChrome({ page = "home" }: { page?: PreviewPage }) {
     return <MaintenanceScreen />;
   }
 
-  // When login is active, the landing page ITSELF changes into the split login screen
-  // (Site info & blue branding on the left, login form on the right - NOT a modal on top)
-  if (isLoginActive) {
-    return <ClientLoginSplitView onClose={closeLogin} />;
-  }
-
   const showHeader = isComponentEnabled(config, "header-builder");
   const showFooter = isComponentEnabled(config, "footer-widgets");
   const showDock = isComponentEnabled(config, "sticky-contact-dock") && !preview.isPreview;
@@ -124,7 +118,8 @@ export function SiteChrome({ page = "home" }: { page?: PreviewPage }) {
         <SitePageBody page={page} />
       </main>
       {showFooter ? <Footer /> : null}
-      {showDock ? <WhatsAppDock /> : null}
+      {showDock && !isLoginActive ? <WhatsAppDock /> : null}
+      {isLoginActive ? <ClientLoginSplitView onClose={closeLogin} /> : null}
     </>
   );
 }

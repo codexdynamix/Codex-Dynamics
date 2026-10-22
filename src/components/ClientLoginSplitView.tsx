@@ -44,6 +44,21 @@ export function ClientLoginSplitView({
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.body.classList.add('client-login-active');
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handleReturnToSite();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.classList.remove('client-login-active');
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   // Reliable autoplay on all platforms
   useEffect(() => {
     const el = videoRef.current;
@@ -150,11 +165,20 @@ export function ClientLoginSplitView({
           : 'Enter the six-digit code sent by support and choose a new password.';
 
   return (
-    <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#0a0b0e] text-white font-sans antialiased overflow-hidden selection:bg-[#0071e3] selection:text-white">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Client portal sign in"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) handleReturnToSite();
+      }}
+      className="fixed inset-0 z-[2147483647] flex items-center justify-center p-3 sm:p-6 lg:p-0 bg-black/70 backdrop-blur-sm lg:bg-[#0a0b0e] lg:backdrop-blur-0 text-white font-sans antialiased selection:bg-[#0071e3] selection:text-white"
+    >
+      <div className="w-full max-w-md max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-2xl border border-white/10 bg-[#0a0b0e] shadow-2xl sm:max-h-[calc(100dvh-3rem)] lg:flex lg:h-full lg:max-h-none lg:max-w-none lg:overflow-hidden lg:rounded-none lg:border-0 lg:shadow-none">
       {/* ========================================================================= */}
       {/* LEFT COLUMN: Hero Section Animating Visual & Codex Dynamics Identity      */}
       {/* ========================================================================= */}
-      <div className="w-full lg:w-1/2 xl:w-[52%] relative flex flex-col justify-between p-8 sm:p-14 lg:p-18 xl:p-20 overflow-hidden min-h-[440px] lg:min-h-screen bg-black select-none border-b lg:border-b-0 lg:border-r border-white/[0.08]">
+      <div className="hidden lg:flex lg:w-1/2 xl:w-[52%] relative flex-col justify-between p-8 sm:p-14 lg:p-18 xl:p-20 overflow-hidden lg:min-h-screen bg-black select-none border-b lg:border-b-0 lg:border-r border-white/[0.08]">
         {/* Base poster layer ensures no flash while video initializes */}
         <div
           className="absolute inset-0 bg-cover bg-center transition-all duration-700"
@@ -215,7 +239,7 @@ export function ClientLoginSplitView({
       {/* ========================================================================= */}
       {/* RIGHT COLUMN: Refined Apple-Style Sign-In Interface                       */}
       {/* ========================================================================= */}
-      <div className="w-full lg:w-1/2 xl:w-[48%] bg-[#0a0b0e] p-8 sm:p-14 lg:p-18 xl:p-20 flex flex-col justify-between min-h-[520px] lg:min-h-screen relative">
+      <div className="w-full lg:w-1/2 xl:w-[48%] bg-[#0a0b0e] p-6 sm:p-8 lg:p-18 xl:p-20 flex flex-col justify-between lg:min-h-screen relative">
         {/* Top Header: Discreet Close Icon (Apple Style) */}
         <div className="flex items-center justify-end w-full">
           <button
@@ -376,6 +400,7 @@ export function ClientLoginSplitView({
         <div className="text-center text-xs text-white/30 pt-4">
           Authorized account access only
         </div>
+      </div>
       </div>
     </div>
   );

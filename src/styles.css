@@ -911,6 +911,16 @@ html.tidio-chat-is-open .whatsapp-dock-container {
   transform: translateY(24px) scale(0.85) !important;
 }
 
+body.client-login-active #tidio-chat,
+body.client-login-active #tidio-chat-iframe,
+body.client-login-active iframe[src*="tidio"],
+body.client-login-active #whatsapp-floating-dock,
+body.client-login-active .whatsapp-dock-container {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 /* Keep the site surfaces crisp and opaque in both modes. */
 .material-light,
 .material-dark,
