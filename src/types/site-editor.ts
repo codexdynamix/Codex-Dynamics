@@ -869,7 +869,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
     accentPreset: "blue",
     logoDark: "/logo-clean.png",
     logoLight: "/logo-clean.png",
-    favicon: "/favicon-clean.png",
+    favicon: "/codex-dynamics-icon.png",
   },
 
   banner: {

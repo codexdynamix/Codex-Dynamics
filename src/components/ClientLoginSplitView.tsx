@@ -211,7 +211,7 @@ export function ClientLoginSplitView({
             className="inline-flex items-center gap-2.5 group cursor-pointer text-left"
           >
             <img
-              src="/favicon-clean.png"
+              src="/codex-dynamics-icon.png"
               alt=""
               className="size-7 object-contain outline-none group-hover:scale-105 transition-transform"
             />

@@ -95,7 +95,11 @@ export function SEO({
     // Older saved site settings still point to the placeholder C icon.
     const configuredFavicon = config.branding?.favicon;
     const favicon =
-      configuredFavicon === "/favicon.svg" ? "/favicon-clean.png" : configuredFavicon;
+      !configuredFavicon || configuredFavicon === "/favicon.svg" ||
+      configuredFavicon === "/favicon-clean.png" ||
+      configuredFavicon === "/favicon-transparent.png"
+        ? "/codex-dynamics-icon.png"
+        : configuredFavicon;
     if (favicon) {
       setLink("icon", favicon);
     }
