@@ -30,8 +30,8 @@ function Mark({ letter, logoUrl, wordmark = false }: { letter?: string; logoUrl?
         src={logoUrl}
         alt={wordmark ? "Codex Dynamics" : "Logo"}
         className={wordmark
-          ? "h-8 w-16 object-contain sm:h-9 sm:w-[4.5rem]"
-          : "size-7 object-contain rounded-[6px] bg-white p-0.5"}
+          ? "h-8 w-16 object-contain outline-none sm:h-9 sm:w-[4.5rem]"
+          : "size-7 object-contain outline-none"}
       />
     );
   }
@@ -137,8 +137,11 @@ export function Nav() {
   const brandName = config.siteName || "Codex Dynamics";
   const brandInitial = brandName.trim().charAt(0).toUpperCase() || "C";
   const configuredLogo = config.branding?.logoLight || config.branding?.logoDark;
-  const brandLogo = configuredLogo || "/logo.png";
-  const usesWordmark = brandLogo === "/logo.png";
+  const usesWordmark = !configuredLogo ||
+    configuredLogo === "/logo.png" ||
+    configuredLogo === "/logo-transparent.png" ||
+    configuredLogo === "/logo-clean.png";
+  const brandLogo = usesWordmark ? "/logo-clean.png" : configuredLogo;
 
   const instagramHref = config.headerSocials?.instagram?.url || socialsGrouped.instagram?.[0]?.href || LINKS.instagram;
   const facebookHref = config.headerSocials?.facebook?.url || socialsGrouped.facebook?.[0]?.href || LINKS.facebook;

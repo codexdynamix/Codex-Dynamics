@@ -867,9 +867,9 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
 
   branding: {
     accentPreset: "blue",
-    logoDark: "/logo.png",
-    logoLight: "/logo.png",
-    favicon: "/favicon.png",
+    logoDark: "/logo-clean.png",
+    logoLight: "/logo-clean.png",
+    favicon: "/favicon-clean.png",
   },
 
   banner: {
