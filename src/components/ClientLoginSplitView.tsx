@@ -213,7 +213,7 @@ export function ClientLoginSplitView({
             <img
               src="/favicon.png"
               alt=""
-              className="size-7 rounded-lg bg-white p-0.5 object-contain group-hover:scale-105 transition-transform"
+              className="size-7 object-contain group-hover:scale-105 transition-transform"
             />
             <span className="font-semibold text-sm tracking-wide text-white font-display">
               Codex Dynamics

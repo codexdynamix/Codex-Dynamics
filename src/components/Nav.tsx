@@ -30,7 +30,7 @@ function Mark({ letter, logoUrl, wordmark = false }: { letter?: string; logoUrl?
         src={logoUrl}
         alt={wordmark ? "Codex Dynamics" : "Logo"}
         className={wordmark
-          ? "h-11 w-24 object-contain rounded-lg bg-white p-1 sm:w-28"
+          ? "h-8 w-16 object-contain sm:h-9 sm:w-[4.5rem]"
           : "size-7 object-contain rounded-[6px] bg-white p-0.5"}
       />
     );
